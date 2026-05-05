@@ -1,31 +1,27 @@
 'use client'
 import { useEffect, useState, useRef } from 'react'
-import { Mic, Search, Grid, ShoppingCart, Activity, Briefcase, Menu, X, ChevronLeft, Bookmark, FileText, Send, BookOpen, User, Bot } from 'lucide-react'
+import { Mic, Search, Grid, Activity, Menu, X, ChevronLeft, Bookmark, FileText, Send, BookOpen, User, Bot, PenTool, Package, CreditCard } from 'lucide-react'
 
 // 👇 MANA SHU YERGA N8N "PRODUCTION URL" SSILKASINI QO'YING:
-const N8N_WEBHOOK_URL = "BU_YERGA_N8N_PRODUCTION_URL_SSILKASINI_QOYING";
+const N8N_WEBHOOK_URL = "https://abusaidbakrdov.app.n8n.cloud/webhook-test/8bafdcfb-2d60-4698-ad3e-920c16074495";
 
 export default function Home() {
   const [userData, setUserData] = useState<any>(null)
   const [isRecording, setIsRecording] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
 
-  // Oynalar holati
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [isAppsOpen, setIsAppsOpen] = useState(false)
-  const [isKitobOpen, setIsKitobOpen] = useState(false) // Qarzlar daftari oynasi
+  const [isKitobOpen, setIsKitobOpen] = useState(false)
 
-  // Chat va Input uchun
   const [inputText, setInputText] = useState("")
-  const [messages, setMessages] = useState<{ role: string, text: string }[]>([
-    { role: 'ai', text: 'Salom! Ovozli xabar qoldiring yoki matn yozing.' }
-  ])
+  const [messages, setMessages] = useState<{ role: string, text: string }[]>([])
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<BlobPart[]>([])
   const chatEndRef = useRef<HTMLDivElement>(null)
+  const [webApp, setWebApp] = useState<any>(null)
 
-  // Xabarlar ko'payganda eng pastga avtomat tushish
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
@@ -41,17 +37,23 @@ export default function Home() {
         if (WebApp.initDataUnsafe && WebApp.initDataUnsafe.user) {
           setUserData(WebApp.initDataUnsafe.user);
         }
+        setWebApp(WebApp);
       });
     }
   }, [])
 
-  // 🚀 ASOSIY FUNKSIYA: N8N GA JO'NATISH VA JAVOBNI KUTISH
+  const openExternalLink = (url: string) => {
+    if (webApp) webApp.openLink(url);
+    else window.open(url, '_blank');
+    setIsAppsOpen(false);
+  }
+
+  // AI GA YUBORISH
   const sendToAI = async (text: string | null, audioBlob: Blob | null = null) => {
     setIsLoading(true);
 
-    // Foydalanuvchi xabarini ekranga qo'shish
     if (text) setMessages(prev => [...prev, { role: 'user', text: text }]);
-    if (audioBlob) setMessages(prev => [...prev, { role: 'user', text: '🎤 Ovozli xabar...' }]);
+    if (audioBlob) setMessages(prev => [...prev, { role: 'user', text: '🎤 Ovozli xabar yuborildi...' }]);
 
     try {
       let response;
@@ -68,29 +70,27 @@ export default function Home() {
         });
       }
 
-      // N8n dan kelgan AI javobini ushlab olish va chatga chiqarish
       const data = await response.json();
       if (data && data.reply) {
         setMessages(prev => [...prev, { role: 'ai', text: data.reply }]);
       } else {
-        setMessages(prev => [...prev, { role: 'ai', text: '✅ Qabul qilindi! (Lekin n8n dan javob qaytmadi. Webhook Response ni tekshiring)' }]);
+        // Agar n8n da 'reply' deb JSON qaytarmagan bo'lsangiz
+        setMessages(prev => [...prev, { role: 'ai', text: '✅ Qabul qilindi! N8n-da "Respond to Webhook" sozlanganligini tekshiring.' }]);
       }
-
     } catch (error) {
-      setMessages(prev => [...prev, { role: 'ai', text: '❌ Aloqa uzildi. Internetni yoki n8n ssilkasini tekshiring.' }]);
+      setMessages(prev => [...prev, { role: 'ai', text: '❌ Aloqa uzildi. Webhook ssilkasini tekshiring.' }]);
     } finally {
       setIsLoading(false);
-      setInputText(""); // Inputni tozalash
+      setInputText("");
     }
   }
 
-  // Matn yuborish
   const handleSendText = () => {
     if (inputText.trim() === "") return;
     sendToAI(inputText);
   }
 
-  // Ovoz yuborish
+  // OVOZ YOZISH
   const toggleRecording = async () => {
     if (isRecording) {
       mediaRecorderRef.current?.stop();
@@ -112,7 +112,8 @@ export default function Home() {
         mediaRecorderRef.current = recorder;
         setIsRecording(true);
       } catch (err) {
-        alert("Mikrofonga ruxsat bering!");
+        if (webApp) webApp.showAlert("Iltimos, Telegram sozlamalaridan Mikrofonga ruxsat bering!");
+        else alert("Mikrofonga ruxsat bering!");
       }
     }
   }
@@ -121,9 +122,9 @@ export default function Home() {
     <main className="relative flex h-screen bg-[#111114] text-white font-sans overflow-hidden">
       {isLoading && <div className="absolute top-0 left-0 w-full h-1 bg-blue-500 animate-pulse z-50"></div>}
 
-      {/* CHAP PANEL VA SUPER APP TUGMASI (Eski holatidek) */}
+      {/* CHAP PANEL */}
       {!isSidebarOpen && (
-        <button onClick={() => setIsSidebarOpen(true)} className="absolute left-0 top-[60%] -translate-y-1/2 bg-[#2c2c31]/80 backdrop-blur-md px-1 py-4 rounded-r-xl flex flex-col items-center gap-2 z-20 shadow-lg">
+        <button onClick={() => setIsSidebarOpen(true)} className="absolute left-0 top-[60%] -translate-y-1/2 bg-[#2c2c31]/80 backdrop-blur-md px-1 py-4 rounded-r-xl flex flex-col items-center gap-2 z-20 shadow-lg active:scale-95 transition-transform">
           <Grid size={14} className="text-blue-400" />
           <span style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }} className="text-[10px] text-gray-300 font-bold tracking-widest mt-1">SUPER APP</span>
         </button>
@@ -135,109 +136,107 @@ export default function Home() {
 
       {/* ASOSIY OYNA */}
       <section className="flex-1 flex flex-col w-full h-full pt-4 pb-[90px]">
-
-        <header className="flex justify-between items-center w-full px-4 mb-4">
+        <header className="flex justify-between items-center w-full px-4 mb-6">
           <div className="w-8 h-8 rounded-full border border-gray-700 overflow-hidden bg-[#242429] flex justify-center items-center"><Menu size={16} className="text-gray-400" /></div>
-          <div className="flex items-center bg-[#242429] px-4 py-2 rounded-full border border-gray-800"><span className="text-white font-medium text-sm">Jarvis AI</span></div>
+          <div className="flex flex-col items-center">
+            <span className="text-white font-bold text-sm">Jarvis AI</span>
+            <span className="text-[10px] text-green-400">Online</span>
+          </div>
           <div className="flex gap-2"><Bookmark size={20} className="text-gray-400" /></div>
         </header>
 
-        {/* TEZKOR KATEGORIYALAR */}
+        {/* TUGMALAR (Notion, Figma, Kitob) */}
         <div className="px-4 mb-4">
           <div className="grid grid-cols-4 gap-2">
-            <button onClick={() => setIsKitobOpen(true)} className="bg-[#212126] rounded-xl p-3 flex flex-col items-center justify-center gap-2 active:scale-95 transition-transform border border-green-500/30">
+            <button onClick={() => setIsKitobOpen(true)} className="bg-[#212126] rounded-2xl p-3 flex flex-col items-center justify-center gap-2 active:scale-95 transition-transform border border-green-500/30 shadow-lg">
               <BookOpen size={20} className="text-green-400" />
-              <span className="text-[10px] text-gray-300">Kitob (Qarz)</span>
+              <span className="text-[10px] text-gray-300">Qarzlar</span>
             </button>
-            <button className="bg-[#212126] rounded-xl p-3 flex flex-col items-center justify-center gap-2 active:scale-95 transition-transform">
+            <button onClick={() => openExternalLink('https://notion.so')} className="bg-[#212126] rounded-2xl p-3 flex flex-col items-center justify-center gap-2 active:scale-95 transition-transform shadow-lg">
               <FileText size={20} className="text-white" />
-              <span className="text-[10px] text-gray-300">Notion API</span>
+              <span className="text-[10px] text-gray-300">Notion</span>
             </button>
-            <button className="bg-[#212126] rounded-xl p-3 flex flex-col items-center justify-center gap-2 active:scale-95 transition-transform">
-              <Activity size={20} className="text-cyan-400" />
-              <span className="text-[10px] text-gray-300">Shifo24</span>
+            <button onClick={() => openExternalLink('https://figma.com')} className="bg-[#212126] rounded-2xl p-3 flex flex-col items-center justify-center gap-2 active:scale-95 transition-transform shadow-lg">
+              <PenTool size={20} className="text-pink-400" />
+              <span className="text-[10px] text-gray-300">Figma</span>
             </button>
-            <button onClick={() => setIsAppsOpen(true)} className="bg-[#212126] rounded-xl p-3 flex flex-col items-center justify-center gap-2 active:scale-95 transition-transform">
+            <button onClick={() => setIsAppsOpen(true)} className="bg-[#212126] rounded-2xl p-3 flex flex-col items-center justify-center gap-2 active:scale-95 transition-transform shadow-lg">
               <Grid size={20} className="text-blue-400" />
               <span className="text-[10px] text-gray-300">Vse Mini</span>
             </button>
           </div>
         </div>
 
-        {/* 🌟 JONLI CHAT TARIXI (Yangi qism) 🌟 */}
+        {/* CHAT TARIXI */}
         <div className="flex-1 overflow-y-auto px-4 flex flex-col gap-4">
+          {messages.length === 0 && (
+            <div className="flex flex-col items-center justify-center h-full opacity-50">
+              <span className="text-5xl mb-4">🤖</span>
+              <p className="text-sm">Men tayyorman! Buyruq bering.</p>
+            </div>
+          )}
           {messages.map((msg, idx) => (
             <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[80%] rounded-2xl p-3 text-sm ${msg.role === 'user'
-                  ? 'bg-blue-600 text-white rounded-br-none'
-                  : 'bg-[#212126] text-gray-200 rounded-bl-none border border-gray-700/50'
+              <div className={`max-w-[85%] rounded-2xl p-3 text-sm shadow-md ${msg.role === 'user'
+                ? 'bg-blue-600 text-white rounded-br-none'
+                : 'bg-[#212126] text-gray-200 rounded-bl-none border border-gray-700/50'
                 }`}>
-                <div className="flex items-center gap-2 mb-1 opacity-60">
-                  {msg.role === 'user' ? <User size={12} /> : <Bot size={12} />}
-                  <span className="text-[10px] uppercase font-bold">{msg.role === 'user' ? 'Siz' : 'Jarvis'}</span>
-                </div>
                 {msg.text}
               </div>
             </div>
           ))}
           <div ref={chatEndRef} />
         </div>
-
       </section>
 
-      {/* 🌟 CHAT INPUTI VA YUBORISH TUGMASI (Yangi qism) 🌟 */}
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-[#111114] via-[#111114] to-transparent z-10">
-        <div className="flex items-center gap-2">
-          {/* Matn yozish joyi */}
-          <div className="flex-1 bg-[#212126] rounded-full flex items-center px-4 py-3.5 border border-gray-700/50 shadow-lg relative">
-            <input
-              type="text"
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSendText()}
-              placeholder="Habar yozing..."
-              className="bg-transparent border-none outline-none text-white w-full pr-8 text-[16px] placeholder-gray-500"
-            />
-            {/* Yuborish (Send) tugmasi */}
-            {inputText.length > 0 && (
-              <button onClick={handleSendText} className="absolute right-3 text-blue-500 active:scale-90 transition-transform">
-                <Send size={20} />
-              </button>
-            )}
-          </div>
-
-          {/* Ovozli xabar mikrofon */}
-          <button onClick={toggleRecording} className={`w-[52px] h-[52px] shrink-0 rounded-full flex items-center justify-center shadow-xl transition-all duration-300 ${isRecording ? 'bg-red-500 shadow-red-500/40 animate-pulse' : 'bg-blue-600 shadow-blue-600/30'}`}>
-            <Mic size={22} className="text-white" />
-          </button>
+      {/* 🌟 YANGILANGAN PASTKI QISM (Dinamik Send/Mic tugmasi) 🌟 */}
+      <div className="fixed bottom-4 left-4 right-4 flex items-center gap-2 z-10">
+        <div className="flex-1 bg-[#212126] rounded-full flex items-center px-4 py-3.5 border border-gray-700/50 shadow-xl relative">
+          <Search size={20} className="text-gray-400 mr-2 shrink-0" />
+          <input
+            type="text"
+            value={inputText}
+            onChange={(e) => setInputText(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleSendText()}
+            placeholder="Yozing yoki ovozli xabar..."
+            className="bg-transparent border-none outline-none text-white w-full text-[16px] placeholder-gray-500"
+          />
         </div>
+
+        {/* TELEGRAM MANTIQI: Matn bo'lsa Send, bo'lmasa Mikrofon */}
+        {inputText.trim().length > 0 ? (
+          <button
+            onClick={handleSendText}
+            className="w-[52px] h-[52px] shrink-0 rounded-full flex items-center justify-center shadow-xl bg-blue-500 shadow-blue-500/40 active:scale-90 transition-transform"
+          >
+            <Send size={20} className="text-white ml-[-2px]" />
+          </button>
+        ) : (
+          <button
+            onClick={toggleRecording}
+            className={`w-[52px] h-[52px] shrink-0 rounded-full flex items-center justify-center shadow-xl transition-all duration-300 ${isRecording ? 'bg-red-500 shadow-red-500/40 animate-pulse scale-110' : 'bg-[#212126] border border-gray-700/50 active:scale-90'}`}
+          >
+            <Mic size={22} className={isRecording ? 'text-white' : 'text-blue-400'} />
+          </button>
+        )}
       </div>
 
-      {/* 🌟 "KITOB" (HISOB-KITOB) OYNASI - MINI APP ICHIDA 🌟 */}
+      {/* KITOB OYNASI */}
       {isKitobOpen && (
         <div className="fixed inset-0 z-50 flex flex-col bg-[#111114] animate-slide-up">
           <header className="flex justify-between items-center w-full p-4 border-b border-gray-800 bg-[#1a1a1f]">
-            <h2 className="text-lg font-bold flex items-center gap-2"><BookOpen className="text-green-500" /> Qarz va Rasxodlar Daftari</h2>
+            <h2 className="text-lg font-bold flex items-center gap-2"><BookOpen className="text-green-500" /> Daftari</h2>
             <button onClick={() => setIsKitobOpen(false)} className="p-2 bg-[#212126] rounded-full text-gray-400"><X size={20} /></button>
           </header>
-
-          {/* Jadval qismi */}
           <div className="flex-1 overflow-y-auto p-4">
-            <p className="text-xs text-gray-500 mb-4">Bu yerga Notion'dagi haqiqiy ma'lumotlar n8n orqali tortib kelinadi.</p>
-
-            <div className="bg-[#1a1a1f] rounded-xl overflow-hidden border border-gray-800">
+            <div className="bg-[#1a1a1f] rounded-xl overflow-hidden border border-gray-800 shadow-lg">
               <table className="w-full text-left text-sm">
                 <thead className="bg-[#212126] text-gray-400">
-                  <tr>
-                    <th className="p-3 font-medium">Kimdan/Kimga</th>
-                    <th className="p-3 font-medium">Summa</th>
-                    <th className="p-3 font-medium">Holat</th>
-                  </tr>
+                  <tr><th className="p-3 font-medium">Kim/Nima</th><th className="p-3 font-medium">Summa</th><th className="p-3 font-medium">Holat</th></tr>
                 </thead>
                 <tbody className="divide-y divide-gray-800">
-                  <tr><td className="p-3">Hasanboy Aka</td><td className="p-3 text-red-400">-$500</td><td className="p-3"><span className="bg-red-500/20 text-red-400 px-2 py-1 rounded text-[10px]">Qarz</span></td></tr>
+                  <tr><td className="p-3">Hasanboy</td><td className="p-3 text-red-400">-$500</td><td className="p-3"><span className="bg-red-500/20 text-red-400 px-2 py-1 rounded text-[10px]">Qarz</span></td></tr>
                   <tr><td className="p-3">Suxrob</td><td className="p-3 text-green-400">+$1200</td><td className="p-3"><span className="bg-green-500/20 text-green-400 px-2 py-1 rounded text-[10px]">Daromad</span></td></tr>
-                  <tr><td className="p-3">Uzum Market</td><td className="p-3 text-yellow-400">-$45</td><td className="p-3"><span className="bg-yellow-500/20 text-yellow-400 px-2 py-1 rounded text-[10px]">Rasxod</span></td></tr>
                 </tbody>
               </table>
             </div>
@@ -245,6 +244,19 @@ export default function Home() {
         </div>
       )}
 
+      {/* BARCHA ILOVALAR */}
+      {isAppsOpen && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-sm">
+          <div className="w-full h-[60%] bg-[#121216] rounded-t-3xl p-6 relative border-t border-gray-800 animate-slide-up">
+            <button onClick={() => setIsAppsOpen(false)} className="absolute top-4 right-4 p-2 bg-[#212126] rounded-full text-gray-400"><X size={20} /></button>
+            <h3 className="text-xl font-bold mb-6 mt-2">Все сервисы</h3>
+            <div className="grid grid-cols-3 gap-4">
+              <button onClick={() => openExternalLink('https://uzum.uz')} className="flex flex-col items-center gap-2 p-4 bg-[#212126] rounded-2xl active:scale-95 transition-transform"><Package size={24} className="text-purple-500" /><span className="text-xs">Uzum</span></button>
+              <button className="flex flex-col items-center gap-2 p-4 bg-[#212126] rounded-2xl active:scale-95 transition-transform"><CreditCard size={24} className="text-blue-500" /><span className="text-xs">Finance</span></button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   )
 }
