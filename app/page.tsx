@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { Mic, Search, Grid, Menu, X, Bookmark, FileText, Send, BookOpen, User, Bot, Package, CreditCard } from 'lucide-react'
 
-// 👇 DIQQAT! Ssilka ichida "webhook-test" EMAS, faqat "webhook" so'zi bo'lishi shart!
+// N8N PRODUCTION URL:
 const N8N_WEBHOOK_URL = "https://abusaidbakrdov.app.n8n.cloud/webhook/8bafdcfb-2d60-4698-ad3e-920c16074495";
 
 export default function Home() {
@@ -48,11 +48,6 @@ export default function Home() {
 
   // 🚀 AI GA YUBORISH
   const sendToAI = async (text: string | null, audioBlob: Blob | null = null) => {
-    if (!N8N_WEBHOOK_URL.includes("http")) {
-      setMessages(prev => [...prev, { role: 'ai', text: '❌ N8N ssilkasi qo\'yilmagan!' }]);
-      return;
-    }
-
     setIsLoading(true);
     if (text) setMessages(prev => [...prev, { role: 'user', text: text }]);
     if (audioBlob) setMessages(prev => [...prev, { role: 'user', text: '🎤 Ovozli xabar...' }]);
@@ -74,23 +69,18 @@ export default function Home() {
         });
       }
 
-      // XATONING ANIQLASH TIZIMI
-      if (!response.ok) {
-        throw new Error(`${response.status}`);
-      }
+      if (!response.ok) throw new Error(`${response.status}`);
 
       const data = await response.json();
       if (data && data.reply) {
         setMessages(prev => [...prev, { role: 'ai', text: data.reply }]);
       } else {
-        setMessages(prev => [...prev, { role: 'ai', text: '✅ Bordi, lekin n8n javob matnini (reply) topa olmadi.' }]);
+        setMessages(prev => [...prev, { role: 'ai', text: '✅ Bordi, lekin AI matn qaytarmadi.' }]);
       }
     } catch (error: any) {
-      // QANDAY XATO EKKANLIGINI EKRANGA CHIQARAMIZ
-      let xatoXabari = "Aloqa uzildi (CORS yoki Internet xatosi).";
-      if (error.message === "404") xatoXabari = "404 xato: Ssilka xato kiritilgan (test so'zi qolib ketgan).";
-      if (error.message === "500") xatoXabari = "500 xato: n8n ichida qayerdadir xatolik yuz berdi.";
-
+      let xatoXabari = "Aloqa uzildi. n8n'da SAVE tugmasi bosilganiga ishonch hosil qiling!";
+      if (error.message === "404") xatoXabari = "404 xato: Ssilka xato.";
+      if (error.message === "500") xatoXabari = "500 xato: n8n ichida AI xato qildi.";
       setMessages(prev => [...prev, { role: 'ai', text: `❌ ${xatoXabari}` }]);
     } finally {
       setIsLoading(false);
@@ -98,25 +88,31 @@ export default function Home() {
     }
   }
 
+  // 🎤 MUKAMMAL OVOZ YOZISH MANTIQI
   const toggleRecording = async () => {
     if (isRecording) {
       mediaRecorderRef.current?.stop();
       setIsRecording(false);
     } else {
       try {
+        // Brauzer mikrofonga ruxsat berishini so'raymiz
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          alert("Telefoningiz brauzeri mikrofonga ruxsat bermayapti!");
+          return;
+        }
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         const recorder = new MediaRecorder(stream);
         audioChunksRef.current = [];
         recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
         recorder.onstop = () => {
           const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-          sendToAI(null, audioBlob);
+          sendToAI(null, audioBlob); // Yozib bo'lingach avtomat jo'natadi
         };
         recorder.start();
         mediaRecorderRef.current = recorder;
         setIsRecording(true);
       } catch (err) {
-        if (webApp) webApp.showAlert("Mikrofonga ruxsat bermadingiz!");
+        alert("Mikrofonga ulanib bo'lmadi! Telegram sozlamalaridan ruxsat berilganini tekshiring.");
       }
     }
   }
@@ -167,6 +163,7 @@ export default function Home() {
         <div ref={chatEndRef} />
       </div>
 
+      {/* INPUT VA MIKROFON QISMI */}
       <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-[#0a0a0c] via-[#0a0a0c] to-transparent z-10">
         <div className="flex items-end gap-2">
           <div className="flex-1 bg-[#1a1a1f] rounded-3xl flex items-center px-4 py-1.5 border border-gray-700/80 shadow-lg relative min-h-[52px]">
@@ -176,12 +173,12 @@ export default function Home() {
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && sendToAI(inputText)}
               placeholder="Xabar yozing..."
-              // MAJBURIY 16PX ZOOM QILMASLIGI UCHUN
               style={{ fontSize: '16px' }}
               className="bg-transparent border-none outline-none text-white w-full placeholder-gray-500 py-3"
             />
           </div>
 
+          {/* MATN BO'LSA SEND, YO'Q BO'LSA MIKROFON */}
           {inputText.trim().length > 0 ? (
             <button onClick={() => sendToAI(inputText)} className="w-[52px] h-[52px] shrink-0 rounded-full flex items-center justify-center bg-blue-600 shadow-lg shadow-blue-600/30 active:scale-90 transition-transform">
               <Send size={20} className="text-white ml-[-2px]" />
@@ -194,7 +191,7 @@ export default function Home() {
         </div>
       </div>
 
-      {/* MODAL OYNALAR (Avvalgidek qoldi, ularda muammo yo'q) */}
+      {/* Kitob oynasi */}
       {isKitobOpen && (
         <div className="fixed inset-0 z-50 flex flex-col bg-[#0a0a0c] animate-slide-up">
           <header className="flex justify-between items-center p-4 border-b border-gray-800 bg-[#111114]">
@@ -209,22 +206,8 @@ export default function Home() {
                 </thead>
                 <tbody className="divide-y divide-gray-800/50">
                   <tr><td className="p-4">Hasanboy</td><td className="p-4 text-red-400 font-medium">-$500</td><td className="p-4"><span className="bg-red-500/10 border border-red-500/20 text-red-400 px-2 py-1 rounded text-[10px] uppercase font-bold">Qarz</span></td></tr>
-                  <tr><td className="p-4">Suxrob</td><td className="p-4 text-green-400 font-medium">+$1200</td><td className="p-4"><span className="bg-green-500/10 border border-green-500/20 text-green-400 px-2 py-1 rounded text-[10px] uppercase font-bold">Kirim</span></td></tr>
                 </tbody>
               </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {isAppsOpen && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/80 backdrop-blur-sm">
-          <div className="w-full h-[50%] bg-[#111114] rounded-t-[30px] p-6 relative border-t border-gray-800 animate-slide-up shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">
-            <button onClick={() => setIsAppsOpen(false)} className="absolute top-4 right-4 p-2 bg-[#1a1a1f] rounded-full text-gray-400"><X size={20} /></button>
-            <h3 className="text-xl font-bold mb-6 mt-2 text-white">Xizmatlar</h3>
-            <div className="grid grid-cols-4 gap-4">
-              <button onClick={() => openExternalLink('https://uzum.uz')} className="flex flex-col items-center gap-3 active:scale-95 transition-transform"><div className="w-14 h-14 bg-[#1a1a1f] border border-gray-800 rounded-2xl flex items-center justify-center shadow-lg"><Package size={24} className="text-purple-500" /></div><span className="text-xs text-gray-300">Uzum</span></button>
-              <button className="flex flex-col items-center gap-3 active:scale-95 transition-transform"><div className="w-14 h-14 bg-[#1a1a1f] border border-gray-800 rounded-2xl flex items-center justify-center shadow-lg"><CreditCard size={24} className="text-blue-500" /></div><span className="text-xs text-gray-300">Moliya</span></button>
             </div>
           </div>
         </div>
