@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { Mic, Search, Grid, Menu, X, Bookmark, FileText, Send, BookOpen, User, Bot, Package, CreditCard } from 'lucide-react'
 
-// 👇 MANA SHU YERGA N8N "PRODUCTION URL" SSILKASINI QO'YING:
+// 👇 DIQQAT! Ssilka ichida "webhook-test" EMAS, faqat "webhook" so'zi bo'lishi shart!
 const N8N_WEBHOOK_URL = "https://abusaidbakrdov.app.n8n.cloud/webhook/8bafdcfb-2d60-4698-ad3e-920c16074495";
 
 export default function Home() {
@@ -46,16 +46,16 @@ export default function Home() {
     else window.open(url, '_blank');
   }
 
-  // 🚀 AI GA YUBORISH (TEXT VA OVOZ)
+  // 🚀 AI GA YUBORISH
   const sendToAI = async (text: string | null, audioBlob: Blob | null = null) => {
     if (!N8N_WEBHOOK_URL.includes("http")) {
-      setMessages(prev => [...prev, { role: 'ai', text: '❌ Dasturchi xatosi: N8N ssilkasi qo\'yilmagan!' }]);
+      setMessages(prev => [...prev, { role: 'ai', text: '❌ N8N ssilkasi qo\'yilmagan!' }]);
       return;
     }
 
     setIsLoading(true);
     if (text) setMessages(prev => [...prev, { role: 'user', text: text }]);
-    if (audioBlob) setMessages(prev => [...prev, { role: 'user', text: '🎤 Ovozli xabar yuborildi...' }]);
+    if (audioBlob) setMessages(prev => [...prev, { role: 'user', text: '🎤 Ovozli xabar...' }]);
 
     try {
       const url = N8N_WEBHOOK_URL.trim();
@@ -74,16 +74,24 @@ export default function Home() {
         });
       }
 
-      if (!response.ok) throw new Error(`Xato kodi: ${response.status}`);
+      // XATONING ANIQLASH TIZIMI
+      if (!response.ok) {
+        throw new Error(`${response.status}`);
+      }
 
       const data = await response.json();
       if (data && data.reply) {
         setMessages(prev => [...prev, { role: 'ai', text: data.reply }]);
       } else {
-        setMessages(prev => [...prev, { role: 'ai', text: '✅ Qabul qilindi, lekin AI javob yozmadi.' }]);
+        setMessages(prev => [...prev, { role: 'ai', text: '✅ Bordi, lekin n8n javob matnini (reply) topa olmadi.' }]);
       }
     } catch (error: any) {
-      setMessages(prev => [...prev, { role: 'ai', text: `❌ Ulanish xatosi: n8n'da "Publish" yashil yonib turganini tekshiring!` }]);
+      // QANDAY XATO EKKANLIGINI EKRANGA CHIQARAMIZ
+      let xatoXabari = "Aloqa uzildi (CORS yoki Internet xatosi).";
+      if (error.message === "404") xatoXabari = "404 xato: Ssilka xato kiritilgan (test so'zi qolib ketgan).";
+      if (error.message === "500") xatoXabari = "500 xato: n8n ichida qayerdadir xatolik yuz berdi.";
+
+      setMessages(prev => [...prev, { role: 'ai', text: `❌ ${xatoXabari}` }]);
     } finally {
       setIsLoading(false);
       setInputText("");
@@ -168,7 +176,9 @@ export default function Home() {
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && sendToAI(inputText)}
               placeholder="Xabar yozing..."
-              className="bg-transparent border-none outline-none text-white w-full text-[16px] placeholder-gray-500 py-3"
+              // MAJBURIY 16PX ZOOM QILMASLIGI UCHUN
+              style={{ fontSize: '16px' }}
+              className="bg-transparent border-none outline-none text-white w-full placeholder-gray-500 py-3"
             />
           </div>
 
@@ -184,6 +194,7 @@ export default function Home() {
         </div>
       </div>
 
+      {/* MODAL OYNALAR (Avvalgidek qoldi, ularda muammo yo'q) */}
       {isKitobOpen && (
         <div className="fixed inset-0 z-50 flex flex-col bg-[#0a0a0c] animate-slide-up">
           <header className="flex justify-between items-center p-4 border-b border-gray-800 bg-[#111114]">
