@@ -3,7 +3,7 @@ import { useEffect, useState, useRef } from 'react'
 import { Mic, Search, Grid, Menu, X, Bookmark, FileText, Send, BookOpen, User, Bot, Package, CreditCard } from 'lucide-react'
 
 // 👇 MANA SHU YERGA N8N "PRODUCTION URL" SSILKASINI QO'YING:
-const N8N_WEBHOOK_URL = "https://abusaidbakrdov.app.n8n.cloud/webhook-test/8bafdcfb-2d60-4698-ad3e-920c16074495";
+const N8N_WEBHOOK_URL = "https://abusaidbakrdov.app.n8n.cloud/webhook/8bafdcfb-2d60-4698-ad3e-920c16074495";
 
 export default function Home() {
   const [userData, setUserData] = useState<any>(null)
