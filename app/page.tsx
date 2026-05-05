@@ -1,16 +1,20 @@
 'use client'
 import { useEffect, useState } from 'react'
-import WebApp from '@twa-dev/sdk'
 
 export default function Home() {
   const [userData, setUserData] = useState<any>(null)
 
   useEffect(() => {
-    // Telegram muhitida ekanligini tekshiramiz
-    if (typeof window !== 'undefined' && WebApp.initDataUnsafe.user) {
-      setUserData(WebApp.initDataUnsafe.user)
-      WebApp.ready() // Mini App tayyor ekanligini Telegramga bildiramiz
-      WebApp.expand() // Ekranni to'liq ochish
+    // Faqatgina brauzerda (window) ekanligimizni aniq bilganimizdan keyin Telegram SDK ni chaqiramiz
+    if (typeof window !== 'undefined') {
+      import('@twa-dev/sdk').then((module) => {
+        const WebApp = module.default;
+        WebApp.ready();
+        WebApp.expand();
+        if (WebApp.initDataUnsafe && WebApp.initDataUnsafe.user) {
+          setUserData(WebApp.initDataUnsafe.user);
+        }
+      });
     }
   }, [])
 
