@@ -168,7 +168,7 @@ export default function Home() {
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && sendToAI(inputText)}
               placeholder="Xabar yozing..."
-              className="bg-transparent border-none outline-none text-white w-full text-[15px] placeholder-gray-500 py-3"
+              className="bg-transparent border-none outline-none text-white w-full text-[16px] placeholder-gray-500 py-3"
             />
           </div>
 
