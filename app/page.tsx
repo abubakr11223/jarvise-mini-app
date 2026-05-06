@@ -75,6 +75,8 @@ const SHOP_KW    = ['xaridlar','ro\'yxat','список','покупк','superma
 interface Expense  { id:number; name:string; amount:number; type:string }
 interface Debt     { id:number; person:string; amount:number; dir:'gave'|'borrowed'; note:string; date:string }
 interface ShopItem { id:number; text:string; done:boolean }
+interface BrandProfile { name:string; niche:string; audience:string; tone:string; platforms:string[]; language:'uz'|'ru'|'both' }
+interface ContentItem  { id:number; title:string; content:string; platform:string; date:string }
 interface ISpeechRecognition extends EventTarget {
   lang:string; continuous:boolean; interimResults:boolean; maxAlternatives:number
   start():void; stop():void
@@ -115,6 +117,15 @@ export default function Home() {
   const [budgetInput,setBudgetInput]=useState('')
   const [expFilter, setExpFilter] = useState<'ALL'|'XARAJAT'|'DAROMAT'>('ALL')
 
+  // Brand + Content Bank (localStorage)
+  const [brand, setBrand] = useState<BrandProfile>(()=>load('j_brand',{name:'',niche:'',audience:'',tone:'hazilkash va trendy',platforms:['Instagram'],language:'uz'}))
+  const [contentBank, setContentBank] = useState<ContentItem[]>(()=>load('j_bank',[]))
+  const [smmTab, setSmmTab] = useState<'campaign'|'profile'|'bank'>('campaign')
+  const [campaignGoal, setCampaignGoal] = useState<'sell'|'brand'|'engage'|'hook'|'viral'>('sell')
+  const [campaignTopic, setCampaignTopic] = useState('')
+  const [hookTopic, setHookTopic] = useState('')
+  const [bankPreview, setBankPreview] = useState<ContentItem|null>(null)
+
   // SMM state
   const [smmPlatform,setSmmPlatform]=useState('Instagram')
   const [smmTopic,   setSmmTopic]  = useState('')
@@ -136,6 +147,8 @@ export default function Home() {
   useEffect(()=>{ save('j_debt',debts) },[debts])
   useEffect(()=>{ save('j_shop',shopItems) },[shopItems])
   useEffect(()=>{ save('j_budget',budget) },[budget])
+  useEffect(()=>{ save('j_brand',brand) },[brand])
+  useEffect(()=>{ save('j_bank',contentBank) },[contentBank])
   useEffect(()=>{ chatEndRef.current?.scrollIntoView({behavior:'smooth'}) },[messages])
 
   useEffect(()=>{
@@ -177,11 +190,17 @@ export default function Home() {
     abortRef.current=new AbortController()
     const timer=setTimeout(()=>abortRef.current?.abort(),20000)
 
+    // Brand kontekstini qo'shamiz — AI yaxshiroq javob beradi
+    const brandCtx = brand.name
+      ? `[BRAND: "${brand.name}" | Soha: ${brand.niche||'?'} | Auditoriya: ${brand.audience||'?'} | Uslub: ${brand.tone||'professional'} | Til: ${brand.language==='both'?"o'zbek+rus":brand.language==='ru'?'rus':"o'zbek"}]`
+      : ''
+    const fullMsg = brandCtx ? `${brandCtx}\n\n${text}` : text
+
     try{
       const res=await fetch(N8N_WEBHOOK_URL,{
         method:'POST', signal:abortRef.current.signal,
         headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({message:text, user_id:userData?.id||0, username:userData?.username||userData?.first_name||'Foydalanuvchi'}),
+        body:JSON.stringify({message:fullMsg, user_id:userData?.id||0, username:userData?.username||userData?.first_name||'Foydalanuvchi'}),
       })
       clearTimeout(timer)
       if(!res.ok){ const e=await res.json().catch(()=>({})); throw new Error((e as {error?:string}).error||`Xato: ${res.status}`) }
@@ -239,6 +258,64 @@ export default function Home() {
     r.onend=()=>{ setIsRecording(false); setInterimText(''); if(fin.trim()) sendToAI(fin.trim()) }
     r.onerror=(e)=>{ setIsRecording(false); setInterimText(''); const m:Record<string,string>={'no-speech':"🔇 Ovoz eshitilmadi.",'not-allowed':"🔒 Mikrofon ruxsati yo'q.",'network':"🌐 Tarmoq xatosi."}; const msg=m[e.error]; if(msg) setMessages(p=>[...p,{role:'ai',text:msg}]) }
     r.start(); recognitionRef.current=r
+  }
+
+  // ─── Kontent bankga saqlash ──────────────────────────────────────────────
+  const saveToBank=(content:string,platform:string='AI')=>{
+    const item:ContentItem={id:Date.now(),title:content.slice(0,50)+'...',content,platform,date:new Date().toLocaleDateString('uz-UZ')}
+    setContentBank(p=>[item,...p.slice(0,49)])
+  }
+
+  // ─── Campaign generator ──────────────────────────────────────────────────
+  const createCampaign=()=>{
+    if(!campaignTopic.trim()) return
+    const bp=brand
+    const goalMap={sell:'Sotish/Konversiya',brand:'Brend tanishlik',engage:'Engagement/Reaction',hook:"Ko'zga tashlanadigan boshlanish (5 xil hook)",viral:"Viral kontent g'oyalari (5 ta variant)"}
+    const langMap={uz:"o'zbek",ru:'rus',both:"o'zbek VA rus (ikkalasini alohida yoz)"}
+    const prompt=`🚀 MARKETING KAMPANIYA YARATISH
+
+${bp.name?`✦ Brand: "${bp.name}"`:''}
+${bp.niche?`✦ Soha: ${bp.niche}`:''}
+${bp.audience?`✦ Maqsadli auditoriya: ${bp.audience}`:''}
+✦ Uslub: ${bp.tone||'professional'}
+✦ Platform: ${smmPlatform}
+✦ Mavzu/Mahsulot: ${campaignTopic}
+✦ Maqsad: ${goalMap[campaignGoal]}
+✦ Til: ${langMap[bp.language]||"o'zbek"}
+
+Quyidagi BARCHASINI yarating:
+1️⃣ ${smmPlatform} post matni (emoji bilan, caption tayyor)
+2️⃣ 10 ta hashtag (3 katta + 4 o'rta + 3 kichik)
+3️⃣ Story uchun 3 ta slide g'oyasi
+4️⃣ 3 ta call-to-action (CTA) variant
+5️⃣ Eng yaxshi post qo'yish vaqti
+${bp.language==='both'?'6️⃣ Barcha narsalarni RU tilida ham yoz':''}`
+    setSmmOpen(false)
+    sendToAI(prompt)
+  }
+
+  // ─── Hook generator ──────────────────────────────────────────────────────
+  const generateHooks=()=>{
+    if(!hookTopic.trim()) return
+    const bp=brand
+    const prompt=`📌 HOOK GENERATOR
+
+Brand: ${bp.name||'Mening brendim'}
+Mavzu: ${hookTopic}
+Platform: ${smmPlatform}
+
+Ushbu mavzu uchun 7 ta KUCHLI HOOK yoz (turli xil usullar bilan):
+1. Savol hook
+2. Statistika/raqam hook
+3. Qiziquvchanlik hook
+4. Muammo-yechim hook
+5. Shok qiluvchi dalil hook
+6. Trend/Hozirgi voqea hook
+7. Hazil/Emoji hook
+
+Har birini ${bp.language==='ru'?'rus':bp.language==='both'?"o'zbek va rus":"o'zbek"} tilida yoz.`
+    setSmmOpen(false)
+    sendToAI(prompt)
   }
 
   // ─── Computed values ─────────────────────────────────────────────────────
@@ -375,6 +452,12 @@ export default function Home() {
             <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-[15px] leading-relaxed ${msg.role==='user'?'bg-blue-600 text-white rounded-tr-sm':'bg-[#1a1a1f] text-gray-200 rounded-tl-sm border border-gray-800/60'}`}>
               {msg.role==='ai'?fmt(msg.text):msg.text}
             </div>
+            {msg.role==='ai'&&idx>0&&(
+              <button onClick={()=>saveToBank(msg.text,smmPlatform)}
+                className="mt-1 ml-1 text-[10px] text-gray-600 hover:text-pink-400 flex items-center gap-1 transition-colors">
+                <Bookmark size={10}/> Bankga saqlash
+              </button>
+            )}
           </div>
         ))}
         {isLoading&&(
@@ -584,62 +667,180 @@ export default function Home() {
       )}
 
       {/* ══════════════════════════════════════════
-          📱 SMM TOOLS PANEL
+          📱 SMM TOOLS — KUCHLI MARKETING PANEL
       ══════════════════════════════════════════ */}
       {smmOpen&&(
         <div className="fixed inset-0 z-50 flex flex-col bg-[#0a0a0c] animate-slide-up">
-          <header className="flex justify-between items-center px-4 py-3.5 border-b border-gray-800 bg-[#111114] shrink-0">
-            <h2 className="text-base font-bold flex items-center gap-2"><Megaphone size={16} className="text-pink-400"/>SMM Tools</h2>
-            <button onClick={()=>setSmmOpen(false)} className="p-2 bg-[#1a1a1f] rounded-full"><X size={16}/></button>
+          <header className="flex justify-between items-center px-4 py-3 border-b border-gray-800 bg-[#111114] shrink-0">
+            <h2 className="text-base font-bold flex items-center gap-2"><Megaphone size={15} className="text-pink-400"/>SMM Studio</h2>
+            <button onClick={()=>setSmmOpen(false)} className="p-2 bg-[#1a1a1f] rounded-full"><X size={15}/></button>
           </header>
 
+          {/* Tabs */}
+          <div className="flex border-b border-gray-800 shrink-0">
+            {(['campaign','profile','bank'] as const).map(t=>(
+              <button key={t} onClick={()=>setSmmTab(t)}
+                className={`flex-1 py-2.5 text-xs font-bold transition-colors ${smmTab===t?'text-pink-400 border-b-2 border-pink-400 -mb-px':'text-gray-500'}`}>
+                {t==='campaign'?'🚀 Kampaniya':t==='profile'?'🏢 Brand Profil':'💾 Kontent Bank'}
+              </button>
+            ))}
+          </div>
+
           <div className="flex-1 overflow-y-auto px-4 pt-3 pb-6">
-            {/* Platform */}
-            <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Platform</p>
-            <div className="flex gap-2 flex-wrap mb-4">
-              {PLATFORMS.map(p=>(
-                <button key={p} onClick={()=>setSmmPlatform(p)} className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-colors ${smmPlatform===p?'bg-pink-600 border-pink-500 text-white':'bg-[#1a1a1f] border-gray-700 text-gray-400'}`}>
-                  {p==='Instagram'?'📸':p==='Telegram'?'✈️':p==='Facebook'?'👤':p==='TikTok'?'🎵':p==='YouTube'?'▶️':'💼'} {p}
-                </button>
+
+            {/* ── TAB: KAMPANIYA ── */}
+            {smmTab==='campaign'&&(<>
+              {/* Brand profil banner */}
+              {brand.name&&(
+                <div className="mb-3 px-3 py-2 bg-pink-500/10 border border-pink-500/20 rounded-xl flex items-center gap-2">
+                  <span className="text-xs text-pink-300">🏢 <b>{brand.name}</b> · {brand.niche||'?'}</span>
+                  <button onClick={()=>setSmmTab('profile')} className="ml-auto text-[10px] text-pink-400 underline">O'zgartirish</button>
+                </div>
+              )}
+              {!brand.name&&(
+                <div className="mb-3 px-3 py-2 bg-yellow-500/10 border border-yellow-500/20 rounded-xl">
+                  <p className="text-xs text-yellow-300">⚠️ <b>Brand profilingizni</b> kiriting — AI yaxshiroq kontent yozadi</p>
+                  <button onClick={()=>setSmmTab('profile')} className="text-[10px] text-yellow-400 underline mt-1">→ Profilni to'ldirish</button>
+                </div>
+              )}
+
+              {/* Platform */}
+              <p className="text-[9px] text-gray-500 uppercase tracking-wider mb-1.5">Platform</p>
+              <div className="flex gap-1.5 flex-wrap mb-3">
+                {PLATFORMS.map(p=>(
+                  <button key={p} onClick={()=>setSmmPlatform(p)} className={`px-3 py-1.5 rounded-full text-[11px] font-bold border transition-colors ${smmPlatform===p?'bg-pink-600 border-pink-500 text-white':'bg-[#1a1a1f] border-gray-700 text-gray-400'}`}>
+                    {p==='Instagram'?'📸':p==='Telegram'?'✈️':p==='Facebook'?'👤':p==='TikTok'?'🎵':p==='YouTube'?'▶️':'💼'} {p}
+                  </button>
+                ))}
+              </div>
+
+              {/* Mavzu */}
+              <p className="text-[9px] text-gray-500 uppercase tracking-wider mb-1.5">Mavzu / Mahsulot</p>
+              <input value={campaignTopic} onChange={e=>setCampaignTopic(e.target.value)}
+                placeholder="Masalan: Yoz kolleksiyasi, 40% chegirma..."
+                className="w-full bg-[#1a1a1f] border border-gray-700 rounded-xl px-4 py-2.5 text-sm outline-none mb-3" style={{fontSize:'16px'}}/>
+
+              {/* Maqsad */}
+              <p className="text-[9px] text-gray-500 uppercase tracking-wider mb-1.5">Kampaniya maqsadi</p>
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                {([
+                  {k:'sell',icon:'💰',l:'Sotish'},
+                  {k:'brand',icon:'👁',l:'Brend'},
+                  {k:'engage',icon:'❤️',l:'Engagement'},
+                  {k:'hook',icon:'🎣',l:'Hook yoz'},
+                  {k:'viral',icon:'🔥',l:'Viral g\'oya'},
+                ] as const).map(g=>(
+                  <button key={g.k} onClick={()=>setCampaignGoal(g.k)} className={`py-2 rounded-xl text-xs font-bold border transition-colors ${campaignGoal===g.k?'bg-pink-600 border-pink-500 text-white':'bg-[#1a1a1f] border-gray-700 text-gray-400'}`}>
+                    {g.icon} {g.l}
+                  </button>
+                ))}
+              </div>
+
+              {/* 1-Click Campaign */}
+              <button onClick={createCampaign} disabled={!campaignTopic.trim()}
+                className="w-full py-4 bg-gradient-to-r from-pink-600 to-purple-600 rounded-2xl text-base font-bold disabled:opacity-40 active:scale-[0.98] transition-transform shadow-lg shadow-pink-600/20 mb-3">
+                ⚡ 1-CLICK KAMPANIYA YARATISH
+              </button>
+
+              {/* Hook generator */}
+              <div className="p-3 bg-[#111114] border border-gray-800 rounded-2xl mb-3">
+                <p className="text-[10px] text-gray-400 font-bold mb-2">🎣 HOOK GENERATOR — 7 xil boshlanish</p>
+                <div className="flex gap-2">
+                  <input value={hookTopic} onChange={e=>setHookTopic(e.target.value)}
+                    placeholder="Mavzu: moda, fitnes, ovqat..." className="flex-1 bg-[#1a1a1f] border border-gray-700 rounded-xl px-3 py-2 text-xs outline-none" style={{fontSize:'16px'}}/>
+                  <button onClick={generateHooks} disabled={!hookTopic.trim()} className="px-4 py-2 bg-purple-600 rounded-xl text-xs font-bold disabled:opacity-40">Yaratish</button>
+                </div>
+              </div>
+
+              {/* Quick prompts */}
+              <p className="text-[9px] text-gray-500 uppercase tracking-wider mb-2">Tezkor buyruqlar</p>
+              <div className="grid grid-cols-3 gap-2">
+                {SMM_PROMPTS.slice(0,9).map(sp=>(
+                  <button key={sp.label} onClick={()=>{ setSmmOpen(false); sendToAI(sp.tmpl(smmPlatform,campaignTopic||'...')) }}
+                    className="flex flex-col items-center gap-1 p-2.5 bg-[#111114] border border-gray-800/60 rounded-2xl active:scale-95 transition-transform">
+                    <span className="text-xl">{sp.icon}</span>
+                    <span className="text-[9px] text-gray-400 text-center leading-tight">{sp.label}</span>
+                  </button>
+                ))}
+              </div>
+            </>)}
+
+            {/* ── TAB: BRAND PROFIL ── */}
+            {smmTab==='profile'&&(<>
+              <div className="p-3 mb-3 bg-blue-500/10 border border-blue-500/20 rounded-xl">
+                <p className="text-xs text-blue-300">💡 Brand profilingizni bir marta to'ldiring — AI har doim sizning brendingiz uslubida javob beradi</p>
+              </div>
+              {[
+                {label:'Brand nomi',key:'name' as const,ph:'Masalan: Abubakr Style'},
+                {label:'Soha / Niche',key:'niche' as const,ph:'Moda, fitnes, oziq-ovqat, texnologiya...'},
+                {label:'Maqsadli auditoriya',key:'audience' as const,ph:'18-35 yosh, ayollar, Toshkent...'},
+                {label:'Brand uslubi (Tone)',key:'tone' as const,ph:'Hazilkash, professional, trendy, jiddiy...'},
+              ].map(f=>(
+                <div key={f.key} className="mb-3">
+                  <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">{f.label}</p>
+                  <input value={brand[f.key]} onChange={e=>setBrand(p=>({...p,[f.key]:e.target.value}))}
+                    placeholder={f.ph} className="w-full bg-[#1a1a1f] border border-gray-700 rounded-xl px-4 py-2.5 text-sm outline-none" style={{fontSize:'16px'}}/>
+                </div>
               ))}
-            </div>
 
-            {/* Topic */}
-            <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Mavzu / Mahsulot</p>
-            <input value={smmTopic} onChange={e=>setSmmTopic(e.target.value)}
-              placeholder="Masalan: Yangi kiyim kolleksiyasi..."
-              className="w-full bg-[#1a1a1f] border border-gray-700 rounded-xl px-4 py-3 text-sm outline-none mb-4" style={{fontSize:'16px'}}/>
+              <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1.5">Asosiy platformalar</p>
+              <div className="flex gap-1.5 flex-wrap mb-3">
+                {PLATFORMS.map(p=>{
+                  const sel=brand.platforms.includes(p)
+                  return <button key={p} onClick={()=>setBrand(b=>({...b,platforms:sel?b.platforms.filter(x=>x!==p):[...b.platforms,p]}))}
+                    className={`px-3 py-1.5 rounded-full text-[11px] font-bold border ${sel?'bg-pink-600 border-pink-500 text-white':'bg-[#1a1a1f] border-gray-700 text-gray-400'}`}>{p}</button>
+                })}
+              </div>
 
-            {/* Quick prompts grid */}
-            <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Tezkor buyruqlar</p>
-            <div className="grid grid-cols-3 gap-2 mb-4">
-              {SMM_PROMPTS.map(sp=>(
-                <button key={sp.label} onClick={()=>{ const t=sp.tmpl(smmPlatform,smmTopic||'...'); setSmmOpen(false); sendToAI(t) }}
-                  className="flex flex-col items-center gap-1.5 p-3 bg-[#111114] border border-gray-800/60 rounded-2xl active:scale-95 transition-transform active:bg-[#1a1a1f]">
-                  <span className="text-2xl">{sp.icon}</span>
-                  <span className="text-[10px] text-gray-300 font-medium text-center leading-tight">{sp.label}</span>
-                </button>
+              <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1.5">Kontent tili</p>
+              <div className="flex gap-2 mb-4">
+                {([['uz',"🇺🇿 O'zbek"],['ru','🇷🇺 Русский'],['both','🇺🇿+🇷🇺 Ikkalasi']] as const).map(([k,l])=>(
+                  <button key={k} onClick={()=>setBrand(b=>({...b,language:k}))} className={`flex-1 py-2 rounded-xl text-xs font-bold ${brand.language===k?'bg-blue-600 text-white':'bg-[#1a1a1f] text-gray-400'}`}>{l}</button>
+                ))}
+              </div>
+
+              <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-xl">
+                <p className="text-[11px] text-green-300">✅ Profil <b>avtomatik saqlanadi</b>. Har bir AI so'rovi brand konteksti bilan yuboriladi.</p>
+              </div>
+            </>)}
+
+            {/* ── TAB: KONTENT BANK ── */}
+            {smmTab==='bank'&&(<>
+              {bankPreview&&(
+                <div className="fixed inset-0 z-[300] bg-[#0a0a0c] flex flex-col animate-slide-up">
+                  <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-800 bg-[#111114]">
+                    <button onClick={()=>setBankPreview(null)} className="p-2 bg-[#1a1a1f] rounded-full"><X size={15}/></button>
+                    <span className="text-sm font-bold flex-1 truncate">{bankPreview.platform}</span>
+                    <button onClick={()=>{setInputText(bankPreview.content.slice(0,200));setBankPreview(null);setSmmOpen(false)}} className="px-3 py-1.5 bg-blue-600 rounded-xl text-xs font-bold">Chat ga yuborish</button>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-4">
+                    <p className="text-sm text-gray-200 whitespace-pre-wrap leading-relaxed">{bankPreview.content}</p>
+                  </div>
+                </div>
+              )}
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-sm font-bold">{contentBank.length} ta saqlangan kontent</p>
+                {contentBank.length>0&&<button onClick={()=>setContentBank([])} className="text-[10px] text-red-400 px-3 py-1 bg-red-500/10 rounded-full">Barchasini o'chir</button>}
+              </div>
+              {contentBank.length===0?(
+                <div className="flex flex-col items-center justify-center py-16 gap-3 opacity-30">
+                  <Bookmark size={40} strokeWidth={1}/>
+                  <p className="text-sm">Chat da AI javobini "Bankga saqlash" bosing</p>
+                </div>
+              ):contentBank.map(item=>(
+                <div key={item.id} className="bg-[#111114] border border-gray-800/60 rounded-2xl p-3.5 mb-2">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] font-bold text-pink-400 px-2 py-0.5 bg-pink-500/10 rounded-full">{item.platform}</span>
+                    <span className="text-[9px] text-gray-500">{item.date}</span>
+                  </div>
+                  <p className="text-[12px] text-gray-300 line-clamp-2 mb-2">{item.content}</p>
+                  <div className="flex gap-2">
+                    <button onClick={()=>setBankPreview(item)} className="flex-1 py-1.5 bg-[#1a1a1f] rounded-xl text-[10px] font-bold text-gray-300">Ko'rish</button>
+                    <button onClick={()=>setContentBank(p=>p.filter(c=>c.id!==item.id))} className="p-1.5 bg-[#1a1a1f] rounded-xl"><Trash2 size={12} className="text-gray-500"/></button>
+                  </div>
+                </div>
               ))}
-            </div>
-
-            {/* Custom prompt */}
-            <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">O'z buyrug'ingiz</p>
-            <div className="flex gap-2">
-              <input id="smm-custom" placeholder={`${smmPlatform} uchun...`}
-                className="flex-1 bg-[#1a1a1f] border border-gray-700 rounded-xl px-4 py-3 text-sm outline-none" style={{fontSize:'16px'}}/>
-              <button onClick={()=>{
-                const inp=document.getElementById('smm-custom') as HTMLInputElement
-                if(inp?.value){ setSmmOpen(false); sendToAI(`${smmPlatform} uchun ${inp.value}`) }
-              }} className="px-4 py-3 bg-pink-600 rounded-xl text-sm font-bold">Yuborish</button>
-            </div>
-
-            {/* SMM Tips */}
-            <div className="mt-4 p-4 bg-[#111114] border border-pink-500/20 rounded-2xl">
-              <p className="text-[10px] text-pink-400 font-bold uppercase tracking-wider mb-2">💡 SMM Maslahatlar</p>
-              {["Eng yaxshi post vaqti: 18:00-21:00","Stories uchun 9:16 format ishlating","Hashtag: 5-10 ta maqsadli > 30 ta umumiy","Har kuni kamida 1 ta story","Engagement uchun savol bering"].map(t=>(
-                <p key={t} className="text-[11px] text-gray-400 py-0.5">• {t}</p>
-              ))}
-            </div>
+            </>)}
           </div>
         </div>
       )}
