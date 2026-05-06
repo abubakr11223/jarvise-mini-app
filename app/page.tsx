@@ -2,8 +2,8 @@
 import { useEffect, useState, useRef } from 'react'
 import { Mic, Search, Grid, Menu, X, Bookmark, FileText, Send, BookOpen, User, Bot, Package, CreditCard, ChevronRight, LayoutDashboard, LogOut, ShoppingBag, Car, PenTool, Coffee, MonitorPlay, Calculator } from 'lucide-react'
 
-// 👇 O'ZINGIZNING PRODUCTION SSILKANGIZ:
-const N8N_WEBHOOK_URL = "https://abusaidbakrdov.app.n8n.cloud/webhook/8bafdcfb-2d60-4698-ad3e-920c16074495";
+// Proxy orqali CORS muammosini hal qilamiz
+const N8N_WEBHOOK_URL = "/api/chat";
 
 export default function Home() {
   const [userData, setUserData] = useState<any>(null)
@@ -82,26 +82,36 @@ export default function Home() {
     try {
       let response;
       if (audioBlob) {
+        const ext = audioBlob.type.includes('ogg') ? 'ogg' : audioBlob.type.includes('mp4') ? 'mp4' : 'webm';
         const formData = new FormData();
-        formData.append('audio', audioBlob, 'voice.webm');
+        formData.append('audio', audioBlob, `voice.${ext}`);
         formData.append('user_id', userData?.id?.toString() || '0');
         formData.append('is_voice', 'yes');
-        response = await fetch(N8N_WEBHOOK_URL.trim(), { method: 'POST', body: formData });
+        response = await fetch(N8N_WEBHOOK_URL, { method: 'POST', body: formData });
       } else {
-        response = await fetch(N8N_WEBHOOK_URL.trim(), {
+        response = await fetch(N8N_WEBHOOK_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ message: text, user_id: userData?.id || 0 }),
         });
       }
 
-      if (!response.ok) throw new Error();
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        const errMsg = (errData as { error?: string }).error || `Server xatosi: ${response.status}`;
+        throw new Error(errMsg);
+      }
 
       const data = await response.json();
-      if (data && data.reply) {
-        let replyText = data.reply;
+      let replyText = data?.reply || data?.response || data?.text || data?.message || data?.output || '';
 
-        // 🌟 MAXFIY KODNI QIDIRISH VA JADVALGA QO'SHISH 🌟
+      if (!replyText && Array.isArray(data) && data.length > 0) {
+        const first = data[0] as Record<string, unknown>;
+        replyText = String(first?.reply || first?.text || first?.message || '');
+      }
+
+      if (replyText) {
+        // 🌟 XARAJAT KODI QIDIRISH VA JADVALGA QO'SHISH 🌟
         const expenseMatch = replyText.match(/\[EXPENSE:(.*?)\|(.*?)\|(.*?)\]/i);
         if (expenseMatch) {
           const newExpense = {
@@ -111,17 +121,15 @@ export default function Home() {
             type: expenseMatch[3].trim().toUpperCase()
           };
           setExpenses(prev => [newExpense, ...prev]);
-
-          // Maxfiy kodni foydalanuvchiga ko'rsatmaslik uchun tozalaymiz
           replyText = replyText.replace(/\[EXPENSE:.*?\]/i, '').trim();
         }
-
         setMessages(prev => [...prev, { role: 'ai', text: replyText }]);
       } else {
-        setMessages(prev => [...prev, { role: 'ai', text: '✅ Qabul qildim!' }]);
+        setMessages(prev => [...prev, { role: 'ai', text: '✅ Qabul qilindi!' }]);
       }
     } catch (error) {
-      setMessages(prev => [...prev, { role: 'ai', text: `❌ Uzilish bo'ldi. N8n'ni tekshiring.` }]);
+      const msg = error instanceof Error ? error.message : 'Noma\'lum xato';
+      setMessages(prev => [...prev, { role: 'ai', text: `❌ ${msg}` }]);
     } finally {
       setIsLoading(false);
       setInputText("");
@@ -135,18 +143,27 @@ export default function Home() {
     } else {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const recorder = new MediaRecorder(stream);
+        // Brauzer qo'llaydigan formatni aniqlaymiz
+        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+          ? 'audio/webm;codecs=opus'
+          : MediaRecorder.isTypeSupported('audio/webm')
+          ? 'audio/webm'
+          : MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')
+          ? 'audio/ogg;codecs=opus'
+          : 'audio/mp4';
+        const recorder = new MediaRecorder(stream, { mimeType });
         audioChunksRef.current = [];
         recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
         recorder.onstop = () => {
-          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+          stream.getTracks().forEach(t => t.stop());
           sendToAI(null, audioBlob);
         };
         recorder.start();
         mediaRecorderRef.current = recorder;
         setIsRecording(true);
       } catch (err) {
-        alert("Mikrofon ruxsati yo'q! Sozlamalardan ruxsat bering.");
+        setMessages(prev => [...prev, { role: 'ai', text: "❌ Mikrofon ruxsati yo'q! Sozlamalardan ruxsat bering." }]);
       }
     }
   }
