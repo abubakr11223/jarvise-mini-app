@@ -449,7 +449,7 @@ export default function Home() {
     let stream = existingStream
     if (!stream) {
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 16000 } })
       } catch {
         setMessages(p => [...p, { role: 'ai', text: "🔒 Mikrofon ruxsati yo'q." }])
         return
@@ -462,7 +462,7 @@ export default function Home() {
       : 'audio/ogg;codecs=opus'
     let recorder: MediaRecorder
     try {
-      recorder = new MediaRecorder(stream, { mimeType })
+      recorder = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 64000 })
     } catch {
       stream.getTracks().forEach(t => t.stop())
       setMessages(p => [...p, { role: 'ai', text: "❌ Audio yozib bo'lmadi." }])
