@@ -2,564 +2,480 @@
 import { useEffect, useState, useRef } from 'react'
 import { Mic, Grid, Menu, X, Bookmark, FileText, Send, User, Bot, ChevronRight,
   LayoutDashboard, ShoppingBag, Car, PenTool, Coffee, Calculator,
-  RefreshCw, Globe, MicOff, TrendingDown, TrendingUp, Trash2 } from 'lucide-react'
+  RefreshCw, Globe, MicOff, TrendingDown, TrendingUp, Trash2,
+  HandCoins, CheckSquare, Square, MessageCircle, Megaphone } from 'lucide-react'
 
 const N8N_WEBHOOK_URL = "/api/chat"
 
-// ─── App commands ──────────────────────────────────────────────────────────
-const APP_URLS: Record<string, { url: string; label: string }> = {
-  uzum:    { url: 'https://uzum.uz',            label: 'Uzum' },
-  yandex:  { url: 'https://go.yandex/',         label: 'Yandex Go' },
-  taxi:    { url: 'https://go.yandex/',         label: 'Yandex Go' },
-  lavka:   { url: 'https://lavka.yandex.ru/',   label: 'Yandex Lavka' },
-  notion:  { url: 'https://notion.so',          label: 'Notion' },
-  figma:   { url: 'https://figma.com',          label: 'Figma' },
+// ─── App commands ───────────────────────────────────────────────────────────
+const APP_URLS: Record<string, { url: string }> = {
+  uzum:   { url: 'https://uzum.uz' },
+  yandex: { url: 'https://go.yandex/' },
+  taxi:   { url: 'https://go.yandex/' },
+  lavka:  { url: 'https://lavka.yandex.ru/' },
+  notion: { url: 'https://notion.so' },
+  figma:  { url: 'https://figma.com' },
 }
-
-const OPEN_WORDS = ['och', 'open', 'ocher', 'opendir', 'откры', 'запус', 'bor', 'ko\'r', 'show']
-
-function detectAppCommand(text: string): string | null {
-  const lower = text.toLowerCase()
-  const hasOpenWord = OPEN_WORDS.some(w => lower.includes(w))
-  if (!hasOpenWord) return null
-  for (const [key, { url }] of Object.entries(APP_URLS)) {
-    if (lower.includes(key)) return url
-  }
+const OPEN_WORDS = ['och', 'open', 'откры', 'запус', 'ko\'r', 'bor']
+function detectApp(text: string): string | null {
+  const l = text.toLowerCase()
+  if (!OPEN_WORDS.some(w => l.includes(w))) return null
+  for (const [k, v] of Object.entries(APP_URLS)) if (l.includes(k)) return v.url
   return null
 }
 
-// ─── Expense categories ─────────────────────────────────────────────────────
-const CATEGORY_CONFIG: { keywords: string[]; icon: string; color: string }[] = [
-  { keywords: ['kafe', 'qahva', 'coffee', 'restoran', 'tushlik', 'kechki', 'ovqat', 'еда', 'кафе'],      icon: '🍽️', color: 'orange' },
-  { keywords: ['taxi', 'taksi', 'yandex go', 'transport', 'avtobus', 'metro', 'такси', 'транспорт'],     icon: '🚕', color: 'yellow' },
-  { keywords: ['bozor', 'supermarket', 'oziq', 'mahsulot', 'groceries', 'продукты', 'магазин'],          icon: '🛒', color: 'green' },
-  { keywords: ['kiyim', 'oyoq', 'brend', 'shopping', 'одежда', 'обувь'],                                 icon: '👕', color: 'purple' },
-  { keywords: ['dori', 'dorixona', 'apteka', 'shifokor', 'лекарство', 'аптека'],                         icon: '💊', color: 'red' },
-  { keywords: ['internet', 'telefon', 'aloqa', 'телефон', 'интернет'],                                   icon: '📱', color: 'blue' },
-  { keywords: ['uy', 'kvartira', 'kommunal', 'ijara', 'аренда', 'квартира'],                             icon: '🏠', color: 'teal' },
-  { keywords: ['sport', 'gym', 'fitness', 'спорт'],                                                      icon: '💪', color: 'green' },
-  { keywords: ['ta\'lim', 'kurs', 'kitob', 'обучение', 'курс'],                                          icon: '📚', color: 'blue' },
-  { keywords: ['bank', 'kredit', 'to\'lov', 'кредит'],                                                   icon: '🏦', color: 'gray' },
-  { keywords: ['maosh', 'ish haqi', 'daromat', 'зарплата', 'доход'],                                     icon: '💰', color: 'green' },
+// ─── Category icons ──────────────────────────────────────────────────────────
+const CATS = [
+  { kw: ['kafe','qahva','coffee','restoran','tushlik','ovqat','еда','кафе'], icon:'🍽️', c:'orange' },
+  { kw: ['taxi','taksi','yandex go','transport','avtobus','metro','такси'], icon:'🚕', c:'yellow' },
+  { kw: ['bozor','supermarket','oziq','mahsulot','groceries','продукты'], icon:'🛒', c:'green' },
+  { kw: ['kiyim','oyoq','brend','shopping','одежда','обувь'],               icon:'👕', c:'purple' },
+  { kw: ['dori','dorixona','apteka','shifokor','лекарство'],                icon:'💊', c:'red' },
+  { kw: ['internet','telefon','aloqa','интернет'],                          icon:'📱', c:'blue' },
+  { kw: ['uy','kvartira','kommunal','ijara','аренда'],                      icon:'🏠', c:'teal' },
+  { kw: ['sport','gym','fitness','спорт'],                                  icon:'💪', c:'green' },
+  { kw: ['ta\'lim','kurs','kitob','обучение'],                              icon:'📚', c:'blue' },
+  { kw: ['maosh','ish haqi','зарплата','доход'],                            icon:'💰', c:'green' },
 ]
-
-function getCategoryStyle(name: string): { icon: string; colorClass: string } {
-  const lower = name.toLowerCase()
-  for (const cat of CATEGORY_CONFIG) {
-    if (cat.keywords.some(k => lower.includes(k))) {
-      const colorMap: Record<string, string> = {
-        orange: 'bg-orange-500/15 border-orange-500/30 text-orange-300',
-        yellow: 'bg-yellow-500/15 border-yellow-500/30 text-yellow-300',
-        green:  'bg-green-500/15 border-green-500/30 text-green-300',
-        purple: 'bg-purple-500/15 border-purple-500/30 text-purple-300',
-        red:    'bg-red-500/15 border-red-500/30 text-red-300',
-        blue:   'bg-blue-500/15 border-blue-500/30 text-blue-300',
-        teal:   'bg-teal-500/15 border-teal-500/30 text-teal-300',
-        gray:   'bg-gray-500/15 border-gray-500/30 text-gray-300',
-      }
-      return { icon: cat.icon, colorClass: colorMap[cat.color] || colorMap.gray }
-    }
-  }
-  return { icon: '💸', colorClass: 'bg-gray-500/15 border-gray-500/30 text-gray-300' }
+const COLOR: Record<string,string> = {
+  orange:'bg-orange-500/15 border-orange-500/30 text-orange-300',
+  yellow:'bg-yellow-500/15 border-yellow-500/30 text-yellow-300',
+  green:'bg-green-500/15 border-green-500/30 text-green-300',
+  purple:'bg-purple-500/15 border-purple-500/30 text-purple-300',
+  red:'bg-red-500/15 border-red-500/30 text-red-300',
+  blue:'bg-blue-500/15 border-blue-500/30 text-blue-300',
+  teal:'bg-teal-500/15 border-teal-500/30 text-teal-300',
 }
+function catStyle(name:string){ const l=name.toLowerCase(); for(const c of CATS) if(c.kw.some(k=>l.includes(k))) return {icon:c.icon,cls:COLOR[c.c]||COLOR.blue}; return {icon:'💸',cls:'bg-gray-500/15 border-gray-500/30 text-gray-300'} }
 
-// ─── Expense keywords (auto-show modal) ─────────────────────────────────────
-const EXPENSE_QUERY_WORDS = [
-  'xarajat', 'rashod', 'moliya', 'pul', 'sarf', 'qancha', 'jadval',
-  'расход', 'трат', 'деньги', 'финанс', 'бюджет', 'balance', 'balans'
+// ─── SMM quick prompts ────────────────────────────────────────────────────────
+const SMM_PROMPTS = [
+  { icon:'✍️', label:'Post yoz',       tmpl:(p:string,t:string)=>`${p} uchun post yoz: ${t}` },
+  { icon:'#️⃣', label:'Hashtaglar',    tmpl:(p:string,t:string)=>`${p} post uchun 20 ta hashtag ber: ${t}` },
+  { icon:'📅', label:'Kontent reja',   tmpl:(p:string,t:string)=>`${p} uchun 1 haftalik kontent reja tuz: ${t}` },
+  { icon:'🎯', label:'Reklama matni',  tmpl:(p:string,t:string)=>`${p} uchun reklama matni yoz: ${t}` },
+  { icon:'📝', label:'Bio yoz',        tmpl:(_:string,t:string)=>`SMM mutaxassisi uchun professional bio yoz: ${t}` },
+  { icon:'💡', label:'Story g\'oyalar',tmpl:(p:string,t:string)=>`${p} uchun 5 ta story g'oya ber: ${t}` },
+  { icon:'🔥', label:'Trend mavzular', tmpl:(p:string,_:string)=>`O'zbekistonda hozir ${p} da qaysi mavzular trend?` },
+  { icon:'📊', label:'Tahlil',         tmpl:(p:string,t:string)=>`${p} post tahlili: ${t}` },
+  { icon:'🖼️', label:'Caption',        tmpl:(p:string,t:string)=>`${p} rasm uchun caption yoz: ${t}` },
+  { icon:'📣', label:'Elon matni',     tmpl:(p:string,t:string)=>`${p} uchun e'lon matni yoz: ${t}` },
+  { icon:'🤝', label:'Hamkorlik',      tmpl:(_:string,t:string)=>`Biznes hamkorlik taklifi xati yoz: ${t}` },
+  { icon:'💬', label:'Sharh javob',    tmpl:(_:string,t:string)=>`Bu sharhga professional javob yoz: ${t}` },
 ]
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+const PLATFORMS = ['Instagram','Telegram','Facebook','TikTok','YouTube','LinkedIn']
+
+// ─── Keyword detectors ────────────────────────────────────────────────────────
+const EXPENSE_KW = ['xarajat','rashod','moliya','pul','sarf','qancha','jadval','расход','деньги','финанс','баланс','balance']
+const DEBT_KW    = ['berdim','qarz','oldim','berdi','беру','дал','занял','должен']
+const SHOP_KW    = ['xaridlar','ro\'yxat','список','покупк','supermarket','bozor ro']
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+interface Expense  { id:number; name:string; amount:number; type:string }
+interface Debt     { id:number; person:string; amount:number; dir:'gave'|'borrowed'; note:string; date:string }
+interface ShopItem { id:number; text:string; done:boolean }
 interface ISpeechRecognition extends EventTarget {
-  lang: string; continuous: boolean; interimResults: boolean; maxAlternatives: number
-  start(): void; stop(): void; abort(): void
-  onstart: (() => void) | null; onend: (() => void) | null
-  onresult: ((e: { results: SpeechRecognitionResultList; resultIndex: number }) => void) | null
-  onerror: ((e: { error: string }) => void) | null
+  lang:string; continuous:boolean; interimResults:boolean; maxAlternatives:number
+  start():void; stop():void
+  onstart:(()=>void)|null; onend:(()=>void)|null
+  onresult:((e:{results:SpeechRecognitionResultList;resultIndex:number})=>void)|null
+  onerror:((e:{error:string})=>void)|null
 }
-declare global {
-  interface Window {
-    SpeechRecognition: new () => ISpeechRecognition
-    webkitSpeechRecognition: new () => ISpeechRecognition
-  }
-}
+declare global { interface Window { SpeechRecognition:new()=>ISpeechRecognition; webkitSpeechRecognition:new()=>ISpeechRecognition } }
+
+// ─── localStorage helpers ─────────────────────────────────────────────────────
+function load<T>(key:string, def:T):T { try{ const v=localStorage.getItem(key); return v?JSON.parse(v):def }catch{ return def } }
+function save(key:string, val:unknown){ try{ localStorage.setItem(key,JSON.stringify(val)) }catch{} }
 
 export default function Home() {
-  const [userData, setUserData] = useState<any>(null)
-  const [isRecording, setIsRecording] = useState(false)
+  const [userData,  setUserData]  = useState<any>(null)
   const [isLoading, setIsLoading] = useState(false)
-  const [interimText, setInterimText] = useState('')
-  const [voiceLang, setVoiceLang] = useState<'uz-UZ' | 'ru-RU'>('uz-UZ')
+  const [isRecording,setIsRecording]=useState(false)
+  const [interimText,setInterimText]=useState('')
+  const [voiceLang,  setVoiceLang]=useState<'uz-UZ'|'ru-RU'>('uz-UZ')
+  const [inputText,  setInputText]=useState('')
 
-  const [isAppsOpen, setIsAppsOpen]   = useState(false)
-  const [isKitobOpen, setIsKitobOpen] = useState(false)
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
-  const [expenseFilter, setExpenseFilter] = useState<'ALL' | 'XARAJAT' | 'DAROMAT'>('ALL')
+  // Modals
+  const [sidebar,   setSidebar]   = useState(false)
+  const [appsOpen,  setAppsOpen]  = useState(false)
+  const [expOpen,   setExpOpen]   = useState(false)
+  const [debtOpen,  setDebtOpen]  = useState(false)
+  const [shopOpen,  setShopOpen]  = useState(false)
+  const [smmOpen,   setSmmOpen]   = useState(false)
+  const [browserUrl,setBrowserUrl]= useState<string|null>(null)
+  const [browserLoading,setBrowserLoading]=useState(false)
 
-  const [inputText, setInputText] = useState('')
-  const [messages, setMessages] = useState<{ role: string; text: string }[]>([{
-    role: 'ai',
-    text: 'Salom! Men **JONKA** 🤖\n\nNima qila olaman:\n📊 **Xarajat** — "Kafe da 45,000 so\'m xarajat"\n📅 **Calendar** — "Ertaga 15:00 uchrashuv qo\'sh"\n📝 **Notion** — "Yangi sahifa: Loyiha"\n🔍 **Qidiruv** — "Python haqida ma\'lumot"\n📱 **Ilovalar** — "Uzum oч" yoki "Yandex oч"\n\n🇺🇿 O\'zbek va 🇷🇺 Rus tillarida gaplashish mumkin!\n\n**Sidebar → Ovoz tili** ni o\'zgartiring'
-  }])
+  // Data (localStorage backed)
+  const [messages, setMessages] = useState<{role:string;text:string}[]>([{role:'ai',text:'Salom! Men **JONKA** 🤖\n\nNima qila olaman:\n💰 **Xarajat** — "Kafe da 45,000 xarajat"\n💼 **Qarz** — "Rashidga 50,000 berdim"\n🛒 **Xaridlar** — "Xaridlar ro\'yxatiga non qo\'sh"\n📱 **SMM** — "Instagram uchun post yoz"\n📅 **Calendar** — "Ertaga 15:00 uchrashuv"\n📝 **Notion** — "Yangi sahifa: Loyiha"\n🔍 **Qidiruv** — "Dollar kursi qancha"\n\n🇺🇿 O\'zbek | 🇷🇺 Русский — ikkalasini tushunaman!'}])
+  const [expenses,  setExpenses]  = useState<Expense[]>(()=>load('j_exp',[{id:1,name:'Ovqatlanish',amount:50000,type:'XARAJAT'}]))
+  const [debts,     setDebts]     = useState<Debt[]>(()=>load('j_debt',[]))
+  const [shopItems, setShopItems] = useState<ShopItem[]>(()=>load('j_shop',[]))
+  const [budget,    setBudget]    = useState<number>(()=>load('j_budget',0))
+  const [budgetInput,setBudgetInput]=useState('')
+  const [expFilter, setExpFilter] = useState<'ALL'|'XARAJAT'|'DAROMAT'>('ALL')
 
-  const [expenses, setExpenses] = useState<{ id: number; name: string; amount: number; type: string }[]>([
-    { id: 1, name: 'Ovqatlanish', amount: 50000, type: 'XARAJAT' },
-  ])
+  // SMM state
+  const [smmPlatform,setSmmPlatform]=useState('Instagram')
+  const [smmTopic,   setSmmTopic]  = useState('')
 
-  const [browserUrl, setBrowserUrl] = useState<string | null>(null)
-  const [browserLoading, setBrowserLoading] = useState(false)
-  const iframeRef     = useRef<HTMLIFrameElement>(null)
-  const recognitionRef = useRef<ISpeechRecognition | null>(null)
-  const chatEndRef    = useRef<HTMLDivElement>(null)
-  const abortRef      = useRef<AbortController | null>(null)
+  // Debt form
+  const [debtForm, setDebtForm] = useState<{person:string;amount:string;dir:'gave'|'borrowed';note:string}>({person:'',amount:'',dir:'gave',note:''})
+
+  // Shop form
+  const [shopInput, setShopInput] = useState('')
+
+  const iframeRef      = useRef<HTMLIFrameElement>(null)
+  const recognitionRef = useRef<ISpeechRecognition|null>(null)
+  const chatEndRef     = useRef<HTMLDivElement>(null)
+  const abortRef       = useRef<AbortController|null>(null)
   const [webApp, setWebApp] = useState<any>(null)
 
-  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
+  // Persist
+  useEffect(()=>{ save('j_exp',expenses) },[expenses])
+  useEffect(()=>{ save('j_debt',debts) },[debts])
+  useEffect(()=>{ save('j_shop',shopItems) },[shopItems])
+  useEffect(()=>{ save('j_budget',budget) },[budget])
+  useEffect(()=>{ chatEndRef.current?.scrollIntoView({behavior:'smooth'}) },[messages])
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    import('@twa-dev/sdk').then(m => {
-      const W = m.default
-      W.ready(); W.expand()
+  useEffect(()=>{
+    if(typeof window==='undefined') return
+    import('@twa-dev/sdk').then(m=>{
+      const W=m.default; W.ready(); W.expand()
       W.setHeaderColor('#111114'); W.setBackgroundColor('#111114')
-      if (W.initDataUnsafe?.user) setUserData(W.initDataUnsafe.user)
+      if(W.initDataUnsafe?.user) setUserData(W.initDataUnsafe.user)
       setWebApp(W)
     })
-  }, [])
+  },[])
 
-  const openApp = (url: string) => setBrowserUrl(url)
+  const openApp=(url:string)=>setBrowserUrl(url)
 
-  const formatMessage = (text: string) =>
-    text.split(/\\n|\n/).map((line, i, arr) => {
-      const parts = line.split(/(\*\*.*?\*\*)/g)
-      return (
-        <span key={i}>
-          {parts.map((p, j) =>
-            p.startsWith('**') && p.endsWith('**')
-              ? <strong key={j} className="text-white font-bold">{p.slice(2,-2)}</strong>
-              : p
-          )}
-          {i < arr.length - 1 && <br />}
-        </span>
-      )
-    })
+  const fmt=(text:string)=>text.split(/\\n|\n/).map((line,i,a)=>(
+    <span key={i}>
+      {line.split(/(\*\*.*?\*\*)/g).map((p,j)=>
+        p.startsWith('**')&&p.endsWith('**')
+          ?<strong key={j} className="text-white font-bold">{p.slice(2,-2)}</strong>
+          :p
+      )}
+      {i<a.length-1&&<br/>}
+    </span>
+  ))
 
-  // ─── Xarajat so'rovini aniqlash ─────────────────────────────────────────
-  const checkExpenseQuery = (text: string) => {
-    const lower = text.toLowerCase()
-    return EXPENSE_QUERY_WORDS.some(w => lower.includes(w))
-  }
-
-  // ─── Asosiy AI call ─────────────────────────────────────────────────────
-  const sendToAI = async (text: string) => {
-    if (!text.trim() || isLoading) return
+  // ─── AI call ─────────────────────────────────────────────────────────────
+  const sendToAI=async(text:string)=>{
+    if(!text.trim()||isLoading) return
     setInputText(''); setInterimText('')
+    const url=detectApp(text); if(url) openApp(url)
+    const l=text.toLowerCase()
+    if(EXPENSE_KW.some(w=>l.includes(w))) setTimeout(()=>setExpOpen(true),1200)
+    if(DEBT_KW.some(w=>l.includes(w)))    setTimeout(()=>setDebtOpen(true),1200)
+    if(SHOP_KW.some(w=>l.includes(w)))    setTimeout(()=>setShopOpen(true),1200)
 
-    // Ilovani ochish buyrug'i
-    const appUrl = detectAppCommand(text)
-    if (appUrl) openApp(appUrl)
-
-    // Xarajat jadvalini ko'rsatish
-    if (checkExpenseQuery(text)) {
-      setTimeout(() => setIsKitobOpen(true), 1200)
-    }
-
-    setMessages(prev => [...prev, { role: 'user', text }])
+    setMessages(p=>[...p,{role:'user',text}])
     setIsLoading(true)
-
-    // Abort controller (10 soniya timeout)
     abortRef.current?.abort()
-    abortRef.current = new AbortController()
-    const timer = setTimeout(() => abortRef.current?.abort(), 15000)
+    abortRef.current=new AbortController()
+    const timer=setTimeout(()=>abortRef.current?.abort(),20000)
 
-    try {
-      const res = await fetch(N8N_WEBHOOK_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: abortRef.current.signal,
-        body: JSON.stringify({
-          message: text,
-          user_id: userData?.id || 0,
-          username: userData?.username || userData?.first_name || 'Foydalanuvchi',
-        }),
+    try{
+      const res=await fetch(N8N_WEBHOOK_URL,{
+        method:'POST', signal:abortRef.current.signal,
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({message:text, user_id:userData?.id||0, username:userData?.username||userData?.first_name||'Foydalanuvchi'}),
       })
       clearTimeout(timer)
+      if(!res.ok){ const e=await res.json().catch(()=>({})); throw new Error((e as {error?:string}).error||`Xato: ${res.status}`) }
 
-      if (!res.ok) {
-        const e = await res.json().catch(() => ({}))
-        throw new Error((e as { error?: string }).error || `Xato: ${res.status}`)
-      }
+      const data=await res.json()
+      let reply:string=data?.reply||data?.response||data?.text||data?.message||data?.output||''
 
-      const data = await res.json()
-      let reply: string = data?.reply || data?.response || data?.text || data?.message || data?.output || ''
+      if(reply){
+        // [OPEN:app]
+        const om=reply.match(/\[OPEN:(\w+)\]/i)
+        if(om){ const k=om[1].toLowerCase(); if(APP_URLS[k]) openApp(APP_URLS[k].url); reply=reply.replace(/\[OPEN:\w+\]/gi,'').trim() }
+        // [EXPENSE:...]
+        const em=reply.match(/\[EXPENSE:(.*?)\|(.*?)\|(.*?)\]/i)
+        if(em){ addExpense(em[1].trim(),parseInt(em[2].replace(/\D/g,''))||0,em[3].trim().toUpperCase()); reply=reply.replace(/\[EXPENSE:.*?\]/gi,'').trim() }
+        else if(data?.expense){ const e=data.expense as Expense; addExpense(e.name,e.amount,e.type) }
+        // [DEBT:person|amount|gave/borrowed]
+        const dm=reply.match(/\[DEBT:(.*?)\|(.*?)\|(.*?)\]/i)
+        if(dm){ addDebt(dm[1].trim(),parseInt(dm[2].replace(/\D/g,''))||0,dm[3].trim() as 'gave'|'borrowed',''); reply=reply.replace(/\[DEBT:.*?\]/gi,'').trim() }
+        // [SHOP:item]
+        const shm=reply.match(/\[SHOP:(.*?)\]/gi)
+        if(shm){ shm.forEach(s=>{ const m=s.match(/\[SHOP:(.*?)\]/i); if(m) addShop(m[1].trim()) }); reply=reply.replace(/\[SHOP:.*?\]/gi,'').trim() }
 
-      if (reply) {
-        // [OPEN:appname] — ilovani ochish
-        const openMatch = reply.match(/\[OPEN:(\w+)\]/i)
-        if (openMatch) {
-          const key = openMatch[1].toLowerCase()
-          if (APP_URLS[key]) openApp(APP_URLS[key].url)
-          reply = reply.replace(/\[OPEN:\w+\]/gi, '').trim()
-        }
-
-        // [EXPENSE:...] — xarajat qo'shish
-        const expMatch = reply.match(/\[EXPENSE:(.*?)\|(.*?)\|(.*?)\]/i)
-        if (expMatch) {
-          addExpense(expMatch[1].trim(), parseInt(expMatch[2].replace(/\D/g,''))||0, expMatch[3].trim().toUpperCase())
-          reply = reply.replace(/\[EXPENSE:.*?\]/gi, '').trim()
-        } else if (data?.expense) {
-          const e = data.expense as { name: string; amount: number; type: string }
-          addExpense(e.name, e.amount, e.type)
-        }
-
-        setMessages(prev => [...prev, { role: 'ai', text: reply }])
+        setMessages(p=>[...p,{role:'ai',text:reply}])
       } else {
-        setMessages(prev => [...prev, { role: 'ai', text: '✅ Qabul qilindi!' }])
+        setMessages(p=>[...p,{role:'ai',text:'✅ Qabul qilindi!'}])
       }
-    } catch (err: unknown) {
+    }catch(err:unknown){
       clearTimeout(timer)
-      if (err instanceof Error && err.name === 'AbortError') {
-        setMessages(prev => [...prev, { role: 'ai', text: '⏱ Vaqt tugadi. Qayta urinib ko\'ring.' }])
+      if(err instanceof Error&&err.name==='AbortError'){
+        setMessages(p=>[...p,{role:'ai',text:"⏱ Vaqt tugadi. Qayta urinib ko'ring."}])
       } else {
-        const msg = err instanceof Error ? err.message : "Xato yuz berdi"
-        setMessages(prev => [...prev, { role: 'ai', text: `❌ ${msg}` }])
+        const msg=err instanceof Error?err.message:"Xato yuz berdi"
+        setMessages(p=>[...p,{role:'ai',text:`❌ ${msg}`}])
       }
-    } finally {
-      setIsLoading(false)
-    }
+    } finally { setIsLoading(false) }
   }
 
-  const addExpense = (name: string, amount: number, type: string) => {
-    if (amount < 100) return
-    setExpenses(prev => [{ id: Date.now(), name, amount, type }, ...prev])
+  // ─── Data helpers ────────────────────────────────────────────────────────
+  const addExpense=(name:string,amount:number,type:string)=>{ if(amount<100) return; setExpenses(p=>[{id:Date.now(),name,amount,type},...p]) }
+  const addDebt=(person:string,amount:number,dir:'gave'|'borrowed',note:string)=>{
+    if(!person||amount<100) return
+    setDebts(p=>[{id:Date.now(),person,amount,dir,note,date:new Date().toLocaleDateString('uz-UZ')},...p])
+  }
+  const addShop=(text:string)=>{ if(!text.trim()) return; setShopItems(p=>[...p,{id:Date.now(),text:text.trim(),done:false}]) }
+
+  // ─── Web Speech API ───────────────────────────────────────────────────────
+  const toggleRec=()=>{
+    if(isRecording){ recognitionRef.current?.stop(); return }
+    const API=typeof window!=='undefined'&&(window.SpeechRecognition||window.webkitSpeechRecognition)
+    if(!API){ setMessages(p=>[...p,{role:'ai',text:"❌ Brauzeringiz ovoz tanishni qo'llab-quvvatlamaydi."}]); return }
+    const r=new API(); r.lang=voiceLang; r.continuous=false; r.interimResults=true; r.maxAlternatives=1
+    let fin=''
+    r.onstart=()=>{ setIsRecording(true); setInterimText('') }
+    r.onresult=(e)=>{ fin=''; let int=''; for(let i=0;i<e.results.length;i++){ if(e.results[i].isFinal) fin+=e.results[i][0].transcript; else int+=e.results[i][0].transcript } setInterimText(fin||int) }
+    r.onend=()=>{ setIsRecording(false); setInterimText(''); if(fin.trim()) sendToAI(fin.trim()) }
+    r.onerror=(e)=>{ setIsRecording(false); setInterimText(''); const m:Record<string,string>={'no-speech':"🔇 Ovoz eshitilmadi.",'not-allowed':"🔒 Mikrofon ruxsati yo'q.",'network':"🌐 Tarmoq xatosi."}; const msg=m[e.error]; if(msg) setMessages(p=>[...p,{role:'ai',text:msg}]) }
+    r.start(); recognitionRef.current=r
   }
 
-  const deleteExpense = (id: number) => setExpenses(prev => prev.filter(e => e.id !== id))
-
-  // ─── Web Speech API ─────────────────────────────────────────────────────
-  const toggleRecording = () => {
-    if (isRecording) { recognitionRef.current?.stop(); return }
-
-    const API = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition)
-    if (!API) {
-      setMessages(prev => [...prev, { role: 'ai', text: '❌ Brauzeringiz ovoz tanishni qo\'llab-quvvatlamaydi. Chrome yoki Telegram ilovasini ishlating.' }])
-      return
-    }
-
-    const r = new API()
-    r.lang = voiceLang
-    r.continuous = false
-    r.interimResults = true
-    r.maxAlternatives = 1
-
-    let finalText = ''
-
-    r.onstart  = () => { setIsRecording(true); setInterimText('') }
-    r.onresult = (e) => {
-      finalText = ''
-      let interim = ''
-      for (let i = 0; i < e.results.length; i++) {
-        if (e.results[i].isFinal) finalText += e.results[i][0].transcript
-        else interim += e.results[i][0].transcript
-      }
-      setInterimText(finalText || interim)
-    }
-    r.onend   = () => { setIsRecording(false); setInterimText(''); if (finalText.trim()) sendToAI(finalText.trim()) }
-    r.onerror = (e) => {
-      setIsRecording(false); setInterimText('')
-      const m: Record<string, string> = {
-        'no-speech':    '🔇 Ovoz eshitilmadi. Qayta urinib ko\'ring.',
-        'audio-capture':'🎤 Mikrofon topilmadi.',
-        'not-allowed':  '🔒 Mikrofon ruxsati yo\'q. Brauzer sozlamalarini oching.',
-        'network':      '🌐 Internet muammosi.',
-      }
-      const msg = m[e.error]
-      if (msg) setMessages(prev => [...prev, { role: 'ai', text: msg }])
-    }
-
-    r.start()
-    recognitionRef.current = r
-  }
-
-  // ─── Expense stats ───────────────────────────────────────────────────────
-  const totalXarajat  = expenses.filter(e => e.type === 'XARAJAT').reduce((s,e) => s + e.amount, 0)
-  const totalDaromat  = expenses.filter(e => e.type !== 'XARAJAT').reduce((s,e) => s + e.amount, 0)
-  const balance       = totalDaromat - totalXarajat
-  const filteredExp   = expenseFilter === 'ALL' ? expenses : expenses.filter(e => e.type === expenseFilter)
+  // ─── Computed values ─────────────────────────────────────────────────────
+  const totalX=expenses.filter(e=>e.type==='XARAJAT').reduce((s,e)=>s+e.amount,0)
+  const totalD=expenses.filter(e=>e.type!=='XARAJAT').reduce((s,e)=>s+e.amount,0)
+  const balance=totalD-totalX
+  const filteredExp=expFilter==='ALL'?expenses:expenses.filter(e=>e.type===expFilter)
+  const netDebt=debts.reduce((s,d)=>d.dir==='gave'?s+d.amount:s-d.amount,0)
+  const budgetUsed=budget>0?Math.min(100,Math.round(totalX/budget*100)):0
 
   return (
     <main className="relative flex flex-col h-screen bg-[#0a0a0c] text-white font-sans overflow-hidden">
-      {isLoading && <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-blue-500 via-purple-500 to-blue-500 bg-[length:200%] animate-[shimmer_1.5s_infinite] z-50" />}
+      {isLoading&&<div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-blue-500 via-purple-500 to-blue-500 bg-[length:200%] animate-[shimmer_1.5s_infinite] z-50"/>}
 
-      {/* ── IN-APP BROWSER ── */}
-      {browserUrl && (
-        <div className="fixed inset-0 z-[200] flex flex-col bg-white">
+      {/* ══ IN-APP BROWSER ══ */}
+      {browserUrl&&(
+        <div className="fixed inset-0 z-[200] flex flex-col">
           <div className="flex items-center gap-2 px-3 py-2 bg-[#111114] border-b border-gray-800 shrink-0">
-            <button onClick={() => setBrowserUrl(null)} className="p-2 rounded-full bg-[#1a1a1f] active:bg-[#333]">
-              <X size={16} className="text-white" />
-            </button>
+            <button onClick={()=>setBrowserUrl(null)} className="p-2 rounded-full bg-[#1a1a1f]"><X size={15} className="text-white"/></button>
             <div className="flex-1 flex items-center gap-2 bg-[#1a1a1f] rounded-full px-3 py-1.5 overflow-hidden">
-              <Globe size={11} className="text-gray-400 shrink-0" />
+              <Globe size={10} className="text-gray-400 shrink-0"/>
               <span className="text-[11px] text-gray-300 truncate">{browserUrl}</span>
             </div>
-            <button onClick={() => { setBrowserLoading(true); if (iframeRef.current) iframeRef.current.src = browserUrl }}
-              className="p-2 rounded-full bg-[#1a1a1f] active:bg-[#333]">
-              <RefreshCw size={13} className="text-gray-400" />
-            </button>
+            <button onClick={()=>{setBrowserLoading(true);if(iframeRef.current)iframeRef.current.src=browserUrl}} className="p-2 rounded-full bg-[#1a1a1f]"><RefreshCw size={12} className="text-gray-400"/></button>
           </div>
-          {browserLoading && <div className="h-0.5 bg-blue-500 animate-pulse" />}
-          <iframe ref={iframeRef} src={browserUrl} className="flex-1 w-full border-0"
-            onLoad={() => setBrowserLoading(false)} onLoadStart={() => setBrowserLoading(true)}
+          {browserLoading&&<div className="h-0.5 bg-blue-500 animate-pulse"/>}
+          <iframe ref={iframeRef} src={browserUrl} className="flex-1 w-full border-0 bg-white"
+            onLoad={()=>setBrowserLoading(false)} onLoadStart={()=>setBrowserLoading(true)}
             allow="camera; microphone; geolocation; payment"
             sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-top-navigation-by-user-activation"
           />
         </div>
       )}
 
-      {/* ── SIDEBAR TOGGLE ── */}
-      {!isSidebarOpen && (
-        <button onClick={() => setIsSidebarOpen(true)}
-          className="absolute left-0 top-[60%] -translate-y-1/2 bg-[#1a1a1f]/90 backdrop-blur-md border border-l-0 border-gray-700/80 px-1 py-5 rounded-r-2xl flex flex-col items-center gap-1 z-20 shadow-[4px_0_15px_rgba(0,0,0,0.5)] active:scale-95 transition-transform">
-          <div className="w-1 h-6 bg-blue-500 rounded-full shadow-[0_0_8px_rgba(59,130,246,0.8)]" />
-          <span style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }} className="text-[9px] text-gray-300 font-bold tracking-widest uppercase">Super App</span>
+      {/* ══ SIDEBAR TOGGLE ══ */}
+      {!sidebar&&(
+        <button onClick={()=>setSidebar(true)} className="absolute left-0 top-[60%] -translate-y-1/2 bg-[#1a1a1f]/90 border border-l-0 border-gray-700/80 px-1 py-5 rounded-r-2xl flex flex-col items-center gap-1 z-20 active:scale-95 transition-transform">
+          <div className="w-1 h-6 bg-blue-500 rounded-full"/>
+          <span style={{writingMode:'vertical-rl',transform:'rotate(180deg)'}} className="text-[8px] text-gray-400 font-bold tracking-widest uppercase">Menu</span>
         </button>
       )}
 
-      {/* ── SIDEBAR ── */}
-      <div className={`fixed inset-y-0 left-0 w-[280px] bg-[#111114] z-50 transform transition-transform duration-300 flex flex-col border-r border-gray-800 shadow-2xl ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="p-5 border-b border-gray-800 flex items-center gap-3 bg-[#1a1a1f]">
-          <div className="w-11 h-11 bg-gradient-to-tr from-blue-600 to-purple-600 rounded-full flex items-center justify-center text-base font-bold">
-            {userData?.first_name?.charAt(0) || 'A'}
+      {/* ══ SIDEBAR ══ */}
+      <div className={`fixed inset-y-0 left-0 w-[280px] bg-[#0d0d10] z-50 transform transition-transform duration-300 flex flex-col border-r border-gray-800/60 shadow-2xl ${sidebar?'translate-x-0':'-translate-x-full'}`}>
+        <div className="p-5 border-b border-gray-800/60 flex items-center gap-3 bg-[#111114]">
+          <div className="w-11 h-11 bg-gradient-to-tr from-blue-600 to-purple-600 rounded-full flex items-center justify-center text-base font-bold shadow-lg">
+            {userData?.first_name?.charAt(0)||'A'}
           </div>
           <div>
-            <p className="font-bold text-sm">{userData?.first_name || 'Abubakr'}</p>
-            <p className="text-[10px] text-blue-400 font-semibold">JONKA Pro</p>
+            <p className="font-bold text-sm">{userData?.first_name||'Abubakr'}</p>
+            <p className="text-[10px] text-blue-400 font-semibold">JONKA Pro · SMM</p>
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto py-4 px-3 flex flex-col gap-1.5">
+        <div className="flex-1 overflow-y-auto py-3 px-2.5 flex flex-col gap-1">
+          {/* Main items */}
           {[
-            { icon: <Calculator size={16} className="text-green-400"/>, label: 'Moliya / Xarajat', action: () => { setIsSidebarOpen(false); setIsKitobOpen(true) } },
-            { icon: <FileText size={16} className="text-gray-200"/>, label: 'Notion Baza', action: () => { setIsSidebarOpen(false); openApp('https://notion.so') } },
-            { icon: <LayoutDashboard size={16} className="text-blue-400"/>, label: 'Barcha Ilovalar', action: () => { setIsSidebarOpen(false); setIsAppsOpen(true) } },
-          ].map(item => (
-            <button key={item.label} onClick={item.action} className="flex items-center justify-between w-full p-3 rounded-xl hover:bg-[#1a1a1f] active:bg-[#242429] transition-colors">
-              <div className="flex items-center gap-3">{item.icon}<span className="text-sm font-medium">{item.label}</span></div>
-              <ChevronRight size={15} className="text-gray-600" />
+            {icon:<Calculator size={15} className="text-green-400"/>, label:'💰 Moliya / Xarajat', action:()=>{setSidebar(false);setExpOpen(true)}},
+            {icon:<HandCoins size={15} className="text-yellow-400"/>, label:'🤝 Qarz Daftari',     action:()=>{setSidebar(false);setDebtOpen(true)}},
+            {icon:<CheckSquare size={15} className="text-blue-400"/>, label:'🛒 Xaridlar Ro\'yxati',action:()=>{setSidebar(false);setShopOpen(true)}},
+            {icon:<Megaphone size={15} className="text-pink-400"/>,   label:'📱 SMM Tools',        action:()=>{setSidebar(false);setSmmOpen(true)}},
+            {icon:<FileText size={15} className="text-gray-200"/>,    label:'📓 Notion Baza',       action:()=>{setSidebar(false);openApp('https://notion.so')}},
+            {icon:<LayoutDashboard size={15} className="text-indigo-400"/>,label:'🚀 Barcha Ilovalar',action:()=>{setSidebar(false);setAppsOpen(true)}},
+          ].map(i=>(
+            <button key={i.label} onClick={i.action} className="flex items-center justify-between w-full p-3 rounded-xl hover:bg-[#1a1a1f] active:bg-[#242429] transition-colors">
+              <div className="flex items-center gap-3">{i.icon}<span className="text-sm font-medium">{i.label}</span></div>
+              <ChevronRight size={14} className="text-gray-600"/>
             </button>
           ))}
 
-          {/* Ovoz tili */}
-          <div className="mt-4 px-1">
-            <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Ovoz tili</p>
+          {/* Voice lang */}
+          <div className="mt-3 px-1">
+            <p className="text-[9px] text-gray-500 uppercase tracking-wider mb-2">Ovoz tili</p>
             <div className="flex gap-2">
-              {(['uz-UZ', 'ru-RU'] as const).map(lang => (
-                <button key={lang} onClick={() => setVoiceLang(lang)}
-                  className={`flex-1 py-2 rounded-xl text-xs font-bold transition-colors ${voiceLang === lang ? 'bg-blue-600 text-white' : 'bg-[#1a1a1f] text-gray-400'}`}>
-                  {lang === 'uz-UZ' ? "🇺🇿 O'zbek" : '🇷🇺 Русский'}
+              {(['uz-UZ','ru-RU'] as const).map(l=>(
+                <button key={l} onClick={()=>setVoiceLang(l)} className={`flex-1 py-2 rounded-xl text-xs font-bold ${voiceLang===l?'bg-blue-600 text-white':'bg-[#1a1a1f] text-gray-400'}`}>
+                  {l==='uz-UZ'?"🇺🇿 UZ":'🇷🇺 RU'}
                 </button>
               ))}
             </div>
           </div>
 
-          {/* AI buyruqlar yordam */}
-          <div className="mt-4 px-1 py-3 bg-[#1a1a1f] rounded-xl border border-gray-800">
-            <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-2">💡 Buyruq misollari</p>
-            {[
-              '"Kafe da 45,000 xarajat"',
-              '"Ertaga 14:00 uchrashuv"',
-              '"Uzum och"',
-              '"Xarajatlarimni ko\'rsat"',
-              '"Python nima?"',
-            ].map(cmd => (
-              <button key={cmd} onClick={() => { setIsSidebarOpen(false); setInputText(cmd.replace(/"/g,'')) }}
-                className="block w-full text-left text-[11px] text-gray-400 py-1 hover:text-blue-400 transition-colors">
-                {cmd}
+          {/* Quick prompts */}
+          <div className="mt-3 p-3 bg-[#1a1a1f] rounded-xl border border-gray-800/60">
+            <p className="text-[9px] text-gray-500 uppercase tracking-wider mb-2">💡 Tez buyruqlar</p>
+            {['"Kafe da 45,000 xarajat"','"Rashidga 50,000 berdim"','"Uzum och"','"Dollar kursi qancha?"','"Instagram post yoz: ..."','"Xarajatlarimni ko\'rsat"'].map(c=>(
+              <button key={c} onClick={()=>{setSidebar(false);setInputText(c.replace(/"/g,''))}} className="block w-full text-left text-[11px] text-gray-400 py-1 hover:text-blue-400">
+                {c}
               </button>
             ))}
           </div>
         </div>
       </div>
-      {isSidebarOpen && <div onClick={() => setIsSidebarOpen(false)} className="fixed inset-0 bg-black/60 z-40 backdrop-blur-sm" />}
+      {sidebar&&<div onClick={()=>setSidebar(false)} className="fixed inset-0 bg-black/60 z-40 backdrop-blur-sm"/>}
 
-      {/* ── HEADER ── */}
-      <header className="flex justify-between items-center w-full px-4 py-3.5 bg-[#111114] border-b border-gray-800/50 shrink-0">
-        <button onClick={() => setIsSidebarOpen(true)} className="w-8 h-8 rounded-full border border-gray-700 bg-[#242429] flex justify-center items-center active:bg-[#333]">
-          <Menu size={15} className="text-gray-400" />
+      {/* ══ HEADER ══ */}
+      <header className="flex justify-between items-center w-full px-4 py-3 bg-[#111114] border-b border-gray-800/50 shrink-0">
+        <button onClick={()=>setSidebar(true)} className="w-8 h-8 rounded-full border border-gray-700 bg-[#242429] flex items-center justify-center active:bg-[#333]">
+          <Menu size={15} className="text-gray-400"/>
         </button>
         <div className="flex flex-col items-center">
-          <span className="text-white font-bold text-sm">JONKA ✨</span>
-          <div className="flex items-center gap-1">
-            <span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse" />
-            <span className="text-[9px] text-green-400">{voiceLang === 'uz-UZ' ? "O'zbek" : 'Русский'}</span>
-          </div>
+          <span className="font-bold text-sm">JONKA ✨</span>
+          <div className="flex items-center gap-1"><span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse"/><span className="text-[9px] text-green-400">Online · {voiceLang==='uz-UZ'?"UZ":'RU'}</span></div>
         </div>
-        <button onClick={() => setIsKitobOpen(true)}>
-          <Bookmark size={19} className="text-gray-400 active:text-white" />
+        <button onClick={()=>setSmmOpen(true)} className="w-8 h-8 rounded-full border border-pink-500/40 bg-pink-500/10 flex items-center justify-center active:bg-pink-500/20">
+          <Megaphone size={14} className="text-pink-400"/>
         </button>
       </header>
 
-      {/* ── QUICK LINKS ── */}
-      <div className="w-full overflow-x-auto scrollbar-hide shrink-0 bg-[#111114] pb-2.5 pt-2">
+      {/* ══ QUICK LINKS ══ */}
+      <div className="w-full overflow-x-auto scrollbar-hide shrink-0 bg-[#111114] pb-2 pt-2">
         <div className="flex gap-2 px-4 w-max">
           {[
-            { icon: <Grid size={13} className="text-blue-400"/>, label: 'Super App', action: () => setIsAppsOpen(true), border: 'border-blue-500/30' },
-            { icon: <ShoppingBag size={13} className="text-purple-400"/>, label: 'Uzum', action: () => openApp('https://uzum.uz'), border: 'border-gray-700' },
-            { icon: <Car size={13} className="text-yellow-400"/>, label: 'Taxi', action: () => openApp('https://go.yandex/'), border: 'border-gray-700' },
-          ].map(item => (
-            <button key={item.label} onClick={item.action} className={`bg-[#1a1a1f] border ${item.border} rounded-full px-3.5 py-2 flex items-center gap-2 active:scale-95 transition-transform`}>
-              {item.icon}
-              <span className="text-xs font-medium">{item.label}</span>
+            {icon:<Grid size={12} className="text-blue-400"/>,    label:'Super App',  act:()=>setAppsOpen(true),  b:'border-blue-500/30'},
+            {icon:<Megaphone size={12} className="text-pink-400"/>,label:'SMM Tools',  act:()=>setSmmOpen(true),   b:'border-pink-500/30'},
+            {icon:<ShoppingBag size={12} className="text-purple-400"/>,label:'Uzum', act:()=>openApp('https://uzum.uz'), b:'border-gray-700'},
+            {icon:<Car size={12} className="text-yellow-400"/>,   label:'Taxi',       act:()=>openApp('https://go.yandex/'), b:'border-gray-700'},
+          ].map(i=>(
+            <button key={i.label} onClick={i.act} className={`bg-[#1a1a1f] border ${i.b} rounded-full px-3.5 py-1.5 flex items-center gap-1.5 active:scale-95 transition-transform`}>
+              {i.icon}<span className="text-[11px] font-medium">{i.label}</span>
             </button>
           ))}
         </div>
       </div>
 
-      {/* ── CHAT ── */}
+      {/* ══ CHAT ══ */}
       <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-3 pb-[90px]">
-        {messages.map((msg, idx) => (
-          <div key={idx} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+        {messages.map((msg,idx)=>(
+          <div key={idx} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
             <div className="flex items-center gap-1 mb-1 opacity-40 px-1">
-              {msg.role === 'user' ? <User size={9}/> : <Bot size={9}/>}
-              <span className="text-[8px] uppercase font-bold tracking-wider">{msg.role === 'user' ? 'Siz' : 'JONKA'}</span>
+              {msg.role==='user'?<User size={9}/>:<Bot size={9}/>}
+              <span className="text-[8px] uppercase font-bold tracking-wider">{msg.role==='user'?'Siz':'JONKA'}</span>
             </div>
-            <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-[15px] leading-relaxed ${
-              msg.role === 'user'
-                ? 'bg-blue-600 text-white rounded-tr-sm'
-                : 'bg-[#1a1a1f] text-gray-200 rounded-tl-sm border border-gray-800/80'
-            }`}>
-              {msg.role === 'ai' ? formatMessage(msg.text) : msg.text}
+            <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-[15px] leading-relaxed ${msg.role==='user'?'bg-blue-600 text-white rounded-tr-sm':'bg-[#1a1a1f] text-gray-200 rounded-tl-sm border border-gray-800/60'}`}>
+              {msg.role==='ai'?fmt(msg.text):msg.text}
             </div>
           </div>
         ))}
-
-        {isLoading && (
+        {isLoading&&(
           <div className="flex flex-col items-start">
-            <div className="flex items-center gap-1 mb-1 opacity-40 px-1">
-              <Bot size={9}/><span className="text-[8px] uppercase font-bold tracking-wider">JONKA</span>
-            </div>
-            <div className="bg-[#1a1a1f] border border-gray-800/80 rounded-2xl rounded-tl-sm px-4 py-3.5 flex gap-1.5 items-end">
-              {[0,150,300].map(d => (
-                <span key={d} className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: `${d}ms` }} />
-              ))}
+            <div className="flex items-center gap-1 mb-1 opacity-40 px-1"><Bot size={9}/><span className="text-[8px] uppercase font-bold tracking-wider">JONKA</span></div>
+            <div className="bg-[#1a1a1f] border border-gray-800/60 rounded-2xl rounded-tl-sm px-4 py-3.5 flex gap-1.5">
+              {[0,150,300].map(d=><span key={d} className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{animationDelay:`${d}ms`}}/>)}
             </div>
           </div>
         )}
-        <div ref={chatEndRef} />
+        <div ref={chatEndRef}/>
       </div>
 
-      {/* ── INPUT ── */}
+      {/* ══ INPUT ══ */}
       <div className="absolute bottom-0 left-0 right-0 px-3 pb-4 pt-2 bg-gradient-to-t from-[#0a0a0c] via-[#0a0a0c]/95 to-transparent z-10">
-        {isRecording && (
+        {isRecording&&(
           <div className="flex items-center gap-2 mb-2 px-3.5 py-2 bg-red-500/10 border border-red-500/30 rounded-2xl">
-            <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse shrink-0" />
-            <span className="text-red-300 text-[13px] flex-1 truncate">
-              {interimText || (voiceLang === 'uz-UZ' ? '🎙 Gapiring...' : '🎙 Говорите...')}
-            </span>
-            <span className="text-[10px] text-red-400 shrink-0">{voiceLang === 'uz-UZ' ? 'UZ' : 'RU'}</span>
+            <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse shrink-0"/>
+            <span className="text-red-300 text-[13px] flex-1 truncate">{interimText||(voiceLang==='uz-UZ'?'🎙 Gapiring...':'🎙 Говорите...')}</span>
           </div>
         )}
-
         <div className="flex items-end gap-2">
-          <div className="flex-1 bg-[#1a1a1f] rounded-3xl flex items-center px-4 border border-gray-700/80 shadow-lg min-h-[52px]">
-            <input
-              type="text" value={inputText}
-              onChange={e => setInputText(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendToAI(inputText) } }}
-              placeholder={isRecording ? '🎤 Tinglanyapti...' : 'JONKA ga yozing...'}
-              style={{ fontSize: '16px' }}
-              className="bg-transparent border-none outline-none text-white w-full placeholder-gray-500 py-3.5"
-            />
+          <div className="flex-1 bg-[#1a1a1f] rounded-3xl flex items-center px-4 border border-gray-700/80 min-h-[52px]">
+            <input type="text" value={inputText} onChange={e=>setInputText(e.target.value)}
+              onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendToAI(inputText)}}}
+              placeholder={isRecording?'🎤 Tinglanyapti...':'JONKA ga yozing...'}
+              style={{fontSize:'16px'}} className="bg-transparent border-none outline-none text-white w-full placeholder-gray-500 py-3.5"/>
           </div>
-          {inputText.trim() ? (
-            <button onClick={() => sendToAI(inputText)} disabled={isLoading}
-              className="w-[52px] h-[52px] shrink-0 rounded-full bg-blue-600 shadow-lg shadow-blue-600/30 flex items-center justify-center active:scale-90 transition-transform disabled:opacity-40">
-              <Send size={19} className="text-white ml-[-2px]" />
+          {inputText.trim()?(
+            <button onClick={()=>sendToAI(inputText)} disabled={isLoading} className="w-[52px] h-[52px] shrink-0 rounded-full bg-blue-600 shadow-lg shadow-blue-600/30 flex items-center justify-center active:scale-90 disabled:opacity-40">
+              <Send size={19} className="text-white ml-[-2px]"/>
             </button>
-          ) : (
-            <button onClick={toggleRecording}
-              className={`w-[52px] h-[52px] shrink-0 rounded-full flex items-center justify-center shadow-lg transition-all duration-200 ${
-                isRecording ? 'bg-red-500 shadow-red-500/40 scale-110' : 'bg-[#1a1a1f] border border-gray-700/80 active:scale-90'
-              }`}>
-              {isRecording ? <MicOff size={20} className="text-white"/> : <Mic size={21} className="text-blue-400"/>}
+          ):(
+            <button onClick={toggleRec} className={`w-[52px] h-[52px] shrink-0 rounded-full flex items-center justify-center shadow-lg transition-all ${isRecording?'bg-red-500 scale-110':'bg-[#1a1a1f] border border-gray-700/80 active:scale-90'}`}>
+              {isRecording?<MicOff size={20} className="text-white"/>:<Mic size={21} className="text-blue-400"/>}
             </button>
           )}
         </div>
       </div>
 
-      {/* ══════════════════════════════════
-          MOLIYA MODALI — chiroyli kategoriya
-          ══════════════════════════════════ */}
-      {isKitobOpen && (
+      {/* ══════════════════════════════════════════
+          💰 MOLIYA MODALI
+      ══════════════════════════════════════════ */}
+      {expOpen&&(
         <div className="fixed inset-0 z-50 flex flex-col bg-[#0a0a0c] animate-slide-up">
-          {/* Header */}
-          <header className="flex justify-between items-center px-4 py-4 border-b border-gray-800 bg-[#111114] shrink-0">
-            <h2 className="text-base font-bold flex items-center gap-2">
-              <Calculator size={18} className="text-green-400"/>Moliya va Xarajat
-            </h2>
-            <button onClick={() => setIsKitobOpen(false)} className="p-2 bg-[#1a1a1f] rounded-full"><X size={18}/></button>
+          <header className="flex justify-between items-center px-4 py-3.5 border-b border-gray-800 bg-[#111114] shrink-0">
+            <h2 className="text-base font-bold flex items-center gap-2"><Calculator size={16} className="text-green-400"/>Moliya</h2>
+            <button onClick={()=>setExpOpen(false)} className="p-2 bg-[#1a1a1f] rounded-full"><X size={16}/></button>
           </header>
-
-          {/* Stats cards */}
-          <div className="px-4 pt-4 grid grid-cols-3 gap-2 shrink-0">
-            <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-3 flex flex-col gap-1">
-              <div className="flex items-center gap-1"><TrendingDown size={12} className="text-red-400"/><span className="text-[10px] text-red-400">Xarajat</span></div>
-              <p className="text-sm font-bold text-red-400">{totalXarajat.toLocaleString()}</p>
-              <p className="text-[9px] text-gray-500">UZS</p>
-            </div>
-            <div className="bg-green-500/10 border border-green-500/20 rounded-2xl p-3 flex flex-col gap-1">
-              <div className="flex items-center gap-1"><TrendingUp size={12} className="text-green-400"/><span className="text-[10px] text-green-400">Daromat</span></div>
-              <p className="text-sm font-bold text-green-400">{totalDaromat.toLocaleString()}</p>
-              <p className="text-[9px] text-gray-500">UZS</p>
-            </div>
-            <div className={`${balance >= 0 ? 'bg-blue-500/10 border-blue-500/20' : 'bg-orange-500/10 border-orange-500/20'} border rounded-2xl p-3 flex flex-col gap-1`}>
-              <p className={`text-[10px] ${balance >= 0 ? 'text-blue-400' : 'text-orange-400'}`}>Balans</p>
-              <p className={`text-sm font-bold ${balance >= 0 ? 'text-blue-400' : 'text-orange-400'}`}>{balance >= 0 ? '+' : ''}{balance.toLocaleString()}</p>
-              <p className="text-[9px] text-gray-500">UZS</p>
-            </div>
+          {/* Stats */}
+          <div className="px-4 pt-3 grid grid-cols-3 gap-2 shrink-0">
+            {[
+              {label:'Xarajat',val:totalX,color:'text-red-400',bg:'bg-red-500/10 border-red-500/20',icon:<TrendingDown size={11} className="text-red-400"/>},
+              {label:'Daromat',val:totalD,color:'text-green-400',bg:'bg-green-500/10 border-green-500/20',icon:<TrendingUp size={11} className="text-green-400"/>},
+              {label:'Balans',val:balance,color:balance>=0?'text-blue-400':'text-orange-400',bg:balance>=0?'bg-blue-500/10 border-blue-500/20':'bg-orange-500/10 border-orange-500/20',icon:null},
+            ].map(s=>(
+              <div key={s.label} className={`${s.bg} border rounded-2xl p-3`}>
+                <div className="flex items-center gap-1 mb-1">{s.icon}<p className={`text-[9px] ${s.color}`}>{s.label}</p></div>
+                <p className={`text-sm font-bold ${s.color}`}>{s.val>=0?'':'-'}{Math.abs(s.val).toLocaleString()}</p>
+                <p className="text-[8px] text-gray-500">UZS</p>
+              </div>
+            ))}
           </div>
-
-          {/* Filter tabs */}
-          <div className="flex gap-2 px-4 pt-3 shrink-0">
-            {(['ALL', 'XARAJAT', 'DAROMAT'] as const).map(f => (
-              <button key={f} onClick={() => setExpenseFilter(f)}
-                className={`px-4 py-1.5 rounded-full text-[11px] font-bold transition-colors ${expenseFilter === f ? 'bg-blue-600 text-white' : 'bg-[#1a1a1f] text-gray-400'}`}>
-                {f === 'ALL' ? 'Hammasi' : f === 'XARAJAT' ? '📉 Xarajat' : '📈 Daromat'}
+          {/* Budget */}
+          {budget>0&&(
+            <div className="px-4 pt-2 shrink-0">
+              <div className="flex justify-between text-[10px] text-gray-400 mb-1">
+                <span>Oylik byudjet: {budget.toLocaleString()} UZS</span>
+                <span className={budgetUsed>80?'text-red-400':'text-gray-400'}>{budgetUsed}%</span>
+              </div>
+              <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                <div className={`h-full rounded-full transition-all ${budgetUsed>80?'bg-red-500':budgetUsed>50?'bg-yellow-500':'bg-green-500'}`} style={{width:`${budgetUsed}%`}}/>
+              </div>
+            </div>
+          )}
+          <div className="px-4 pt-2 flex gap-2 shrink-0">
+            <input value={budgetInput} onChange={e=>setBudgetInput(e.target.value)} placeholder="Oylik byudjet (UZS)" className="flex-1 bg-[#1a1a1f] border border-gray-700 rounded-xl px-3 py-2 text-sm outline-none" style={{fontSize:'16px'}}/>
+            <button onClick={()=>{const v=parseInt(budgetInput.replace(/\D/g,'')); if(v>0){setBudget(v);setBudgetInput('')}}} className="px-4 py-2 bg-blue-600 rounded-xl text-sm font-bold">Saqlash</button>
+          </div>
+          {/* Filter */}
+          <div className="flex gap-2 px-4 pt-2 shrink-0">
+            {(['ALL','XARAJAT','DAROMAT'] as const).map(f=>(
+              <button key={f} onClick={()=>setExpFilter(f)} className={`px-3 py-1 rounded-full text-[11px] font-bold ${expFilter===f?'bg-blue-600 text-white':'bg-[#1a1a1f] text-gray-400'}`}>
+                {f==='ALL'?'Hammasi':f==='XARAJAT'?'📉 Xarajat':'📈 Daromat'}
               </button>
             ))}
           </div>
-
-          {/* Expense list */}
-          <div className="flex-1 overflow-y-auto px-4 pt-3 pb-4 flex flex-col gap-2">
-            {filteredExp.length === 0 ? (
-              <div className="flex-1 flex flex-col items-center justify-center gap-3 opacity-40">
-                <Calculator size={48} strokeWidth={1}/>
-                <p className="text-sm">Hozircha bo'sh</p>
-              </div>
-            ) : filteredExp.map(exp => {
-              const { icon, colorClass } = getCategoryStyle(exp.name)
-              return (
-                <div key={exp.id} className="flex items-center gap-3 bg-[#111114] border border-gray-800/60 rounded-2xl px-4 py-3.5">
-                  {/* Icon */}
-                  <div className={`w-11 h-11 rounded-xl flex items-center justify-center text-xl border ${colorClass} shrink-0`}>
-                    {icon}
-                  </div>
-                  {/* Info */}
+          {/* List */}
+          <div className="flex-1 overflow-y-auto px-4 pt-2 pb-4 flex flex-col gap-2">
+            {filteredExp.length===0?(
+              <div className="flex-1 flex flex-col items-center justify-center gap-2 opacity-30"><Calculator size={40} strokeWidth={1}/><p className="text-sm">Bo'sh</p></div>
+            ):filteredExp.map(exp=>{
+              const {icon,cls}=catStyle(exp.name)
+              return(
+                <div key={exp.id} className="flex items-center gap-3 bg-[#111114] border border-gray-800/60 rounded-2xl px-4 py-3">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg border ${cls} shrink-0`}>{icon}</div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-white truncate">{exp.name}</p>
-                    <p className={`text-xs font-medium mt-0.5 ${exp.type === 'XARAJAT' ? 'text-red-400' : 'text-green-400'}`}>
-                      {exp.type === 'XARAJAT' ? '−' : '+'}{exp.amount.toLocaleString()} UZS
-                    </p>
+                    <p className={`text-xs font-medium ${exp.type==='XARAJAT'?'text-red-400':'text-green-400'}`}>{exp.type==='XARAJAT'?'−':'+'}{exp.amount.toLocaleString()} UZS</p>
                   </div>
-                  {/* Badge + delete */}
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className={`px-2 py-0.5 rounded-lg text-[9px] font-bold border ${exp.type === 'XARAJAT' ? 'bg-red-500/10 border-red-500/30 text-red-400' : 'bg-green-500/10 border-green-500/30 text-green-400'}`}>
-                      {exp.type}
-                    </span>
-                    <button onClick={() => deleteExpense(exp.id)} className="p-1.5 rounded-lg bg-[#1a1a1f] active:bg-[#242429]">
-                      <Trash2 size={13} className="text-gray-500"/>
-                    </button>
-                  </div>
+                  <button onClick={()=>setExpenses(p=>p.filter(e=>e.id!==exp.id))} className="p-1.5 rounded-lg bg-[#1a1a1f]"><Trash2 size={12} className="text-gray-500"/></button>
                 </div>
               )
             })}
@@ -567,36 +483,195 @@ export default function Home() {
         </div>
       )}
 
-      {/* ══════════════════════════════
-          SUPER APP
-          ══════════════════════════════ */}
-      {isAppsOpen && (
+      {/* ══════════════════════════════════════════
+          🤝 QARZ DAFTARI
+      ══════════════════════════════════════════ */}
+      {debtOpen&&(
+        <div className="fixed inset-0 z-50 flex flex-col bg-[#0a0a0c] animate-slide-up">
+          <header className="flex justify-between items-center px-4 py-3.5 border-b border-gray-800 bg-[#111114] shrink-0">
+            <h2 className="text-base font-bold flex items-center gap-2"><HandCoins size={16} className="text-yellow-400"/>Qarz Daftari</h2>
+            <button onClick={()=>setDebtOpen(false)} className="p-2 bg-[#1a1a1f] rounded-full"><X size={16}/></button>
+          </header>
+          {/* Net balance */}
+          <div className="px-4 pt-3 grid grid-cols-2 gap-2 shrink-0">
+            <div className={`${netDebt>=0?'bg-green-500/10 border-green-500/20':'bg-red-500/10 border-red-500/20'} border rounded-2xl p-3`}>
+              <p className={`text-[9px] ${netDebt>=0?'text-green-400':'text-red-400'}`}>{netDebt>=0?'Menga qarzdor':'Men qarzdorman'}</p>
+              <p className={`text-sm font-bold mt-1 ${netDebt>=0?'text-green-400':'text-red-400'}`}>{Math.abs(netDebt).toLocaleString()} UZS</p>
+            </div>
+            <div className="bg-[#1a1a1f] border border-gray-800 rounded-2xl p-3">
+              <p className="text-[9px] text-gray-400">Jami yozuv</p>
+              <p className="text-sm font-bold mt-1">{debts.length} ta</p>
+            </div>
+          </div>
+          {/* Add form */}
+          <div className="px-4 pt-3 shrink-0 space-y-2">
+            <div className="flex gap-2">
+              <input value={debtForm.person} onChange={e=>setDebtForm(p=>({...p,person:e.target.value}))} placeholder="Kim? (Rashid)" className="flex-1 bg-[#1a1a1f] border border-gray-700 rounded-xl px-3 py-2 text-sm outline-none" style={{fontSize:'16px'}}/>
+              <input value={debtForm.amount} onChange={e=>setDebtForm(p=>({...p,amount:e.target.value}))} placeholder="Summa" type="number" className="w-28 bg-[#1a1a1f] border border-gray-700 rounded-xl px-3 py-2 text-sm outline-none" style={{fontSize:'16px'}}/>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={()=>setDebtForm(p=>({...p,dir:'gave'}))} className={`flex-1 py-2 rounded-xl text-xs font-bold ${debtForm.dir==='gave'?'bg-green-600 text-white':'bg-[#1a1a1f] text-gray-400'}`}>➡️ Men berdim</button>
+              <button onClick={()=>setDebtForm(p=>({...p,dir:'borrowed'}))} className={`flex-1 py-2 rounded-xl text-xs font-bold ${debtForm.dir==='borrowed'?'bg-red-600 text-white':'bg-[#1a1a1f] text-gray-400'}`}>⬅️ Men oldim</button>
+            </div>
+            <div className="flex gap-2">
+              <input value={debtForm.note} onChange={e=>setDebtForm(p=>({...p,note:e.target.value}))} placeholder="Izoh (ixtiyoriy)" className="flex-1 bg-[#1a1a1f] border border-gray-700 rounded-xl px-3 py-2 text-sm outline-none" style={{fontSize:'16px'}}/>
+              <button onClick={()=>{addDebt(debtForm.person,parseInt(debtForm.amount)||0,debtForm.dir,debtForm.note);setDebtForm({person:'',amount:'',dir:'gave',note:''})}} className="px-4 bg-blue-600 rounded-xl text-sm font-bold">Qo'sh</button>
+            </div>
+          </div>
+          {/* List */}
+          <div className="flex-1 overflow-y-auto px-4 pt-3 pb-4 flex flex-col gap-2">
+            {debts.length===0?(
+              <div className="flex-1 flex flex-col items-center justify-center gap-2 opacity-30"><HandCoins size={40} strokeWidth={1}/><p className="text-sm">Bo'sh</p></div>
+            ):debts.map(d=>(
+              <div key={d.id} className="flex items-center gap-3 bg-[#111114] border border-gray-800/60 rounded-2xl px-4 py-3">
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg ${d.dir==='gave'?'bg-green-500/15 border border-green-500/30':'bg-red-500/15 border border-red-500/30'} shrink-0`}>
+                  {d.dir==='gave'?'➡️':'⬅️'}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-white">{d.person}</p>
+                  <p className={`text-xs font-medium ${d.dir==='gave'?'text-green-400':'text-red-400'}`}>{d.dir==='gave'?'+':'−'}{d.amount.toLocaleString()} UZS</p>
+                  {d.note&&<p className="text-[10px] text-gray-500 truncate">{d.note}</p>}
+                  <p className="text-[9px] text-gray-600">{d.date}</p>
+                </div>
+                <div className="flex flex-col items-end gap-1 shrink-0">
+                  <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${d.dir==='gave'?'bg-green-500/10 text-green-400':'bg-red-500/10 text-red-400'}`}>{d.dir==='gave'?'Berdi':'Oldim'}</span>
+                  <button onClick={()=>setDebts(p=>p.filter(x=>x.id!==d.id))} className="p-1 rounded-lg bg-[#1a1a1f]"><Trash2 size={11} className="text-gray-500"/></button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════
+          🛒 XARIDLAR RO'YXATI
+      ══════════════════════════════════════════ */}
+      {shopOpen&&(
+        <div className="fixed inset-0 z-50 flex flex-col bg-[#0a0a0c] animate-slide-up">
+          <header className="flex justify-between items-center px-4 py-3.5 border-b border-gray-800 bg-[#111114] shrink-0">
+            <h2 className="text-base font-bold flex items-center gap-2"><ShoppingBag size={16} className="text-blue-400"/>Xaridlar Ro'yxati</h2>
+            <div className="flex gap-2">
+              <button onClick={()=>setShopItems(p=>p.filter(i=>!i.done))} className="text-[11px] text-gray-400 px-3 py-1.5 bg-[#1a1a1f] rounded-full">Bajarilganlarni o'chir</button>
+              <button onClick={()=>setShopOpen(false)} className="p-2 bg-[#1a1a1f] rounded-full"><X size={16}/></button>
+            </div>
+          </header>
+          {/* Add */}
+          <div className="flex gap-2 px-4 pt-3 shrink-0">
+            <input value={shopInput} onChange={e=>setShopInput(e.target.value)}
+              onKeyDown={e=>{if(e.key==='Enter'){addShop(shopInput);setShopInput('')}}}
+              placeholder="Mahsulot qo'shing..." className="flex-1 bg-[#1a1a1f] border border-gray-700 rounded-xl px-4 py-2.5 text-sm outline-none" style={{fontSize:'16px'}}/>
+            <button onClick={()=>{addShop(shopInput);setShopInput('')}} className="px-4 bg-blue-600 rounded-xl text-sm font-bold">+</button>
+          </div>
+          {/* Stats */}
+          <div className="px-4 pt-2 flex gap-2 shrink-0">
+            <span className="text-[11px] text-gray-400">{shopItems.filter(i=>i.done).length}/{shopItems.length} bajarildi</span>
+            {shopItems.length>0&&<div className="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden self-center"><div className="h-full bg-green-500 rounded-full transition-all" style={{width:`${shopItems.length?shopItems.filter(i=>i.done).length/shopItems.length*100:0}%`}}/></div>}
+          </div>
+          {/* List */}
+          <div className="flex-1 overflow-y-auto px-4 pt-2 pb-4 flex flex-col gap-2">
+            {shopItems.length===0?(
+              <div className="flex-1 flex flex-col items-center justify-center gap-2 opacity-30"><ShoppingBag size={40} strokeWidth={1}/><p className="text-sm">Bo'sh ro'yxat</p></div>
+            ):[...shopItems.filter(i=>!i.done),...shopItems.filter(i=>i.done)].map(item=>(
+              <button key={item.id} onClick={()=>setShopItems(p=>p.map(i=>i.id===item.id?{...i,done:!i.done}:i))}
+                className={`flex items-center gap-3 bg-[#111114] border rounded-xl px-4 py-3 transition-colors ${item.done?'border-gray-800/30 opacity-50':'border-gray-800/60'}`}>
+                {item.done?<CheckSquare size={18} className="text-green-400 shrink-0"/>:<Square size={18} className="text-gray-500 shrink-0"/>}
+                <span className={`text-sm flex-1 text-left ${item.done?'line-through text-gray-500':'text-white'}`}>{item.text}</span>
+                <button onClick={e=>{e.stopPropagation();setShopItems(p=>p.filter(i=>i.id!==item.id))}} className="p-1 rounded-lg"><Trash2 size={11} className="text-gray-600"/></button>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════
+          📱 SMM TOOLS PANEL
+      ══════════════════════════════════════════ */}
+      {smmOpen&&(
+        <div className="fixed inset-0 z-50 flex flex-col bg-[#0a0a0c] animate-slide-up">
+          <header className="flex justify-between items-center px-4 py-3.5 border-b border-gray-800 bg-[#111114] shrink-0">
+            <h2 className="text-base font-bold flex items-center gap-2"><Megaphone size={16} className="text-pink-400"/>SMM Tools</h2>
+            <button onClick={()=>setSmmOpen(false)} className="p-2 bg-[#1a1a1f] rounded-full"><X size={16}/></button>
+          </header>
+
+          <div className="flex-1 overflow-y-auto px-4 pt-3 pb-6">
+            {/* Platform */}
+            <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Platform</p>
+            <div className="flex gap-2 flex-wrap mb-4">
+              {PLATFORMS.map(p=>(
+                <button key={p} onClick={()=>setSmmPlatform(p)} className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-colors ${smmPlatform===p?'bg-pink-600 border-pink-500 text-white':'bg-[#1a1a1f] border-gray-700 text-gray-400'}`}>
+                  {p==='Instagram'?'📸':p==='Telegram'?'✈️':p==='Facebook'?'👤':p==='TikTok'?'🎵':p==='YouTube'?'▶️':'💼'} {p}
+                </button>
+              ))}
+            </div>
+
+            {/* Topic */}
+            <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Mavzu / Mahsulot</p>
+            <input value={smmTopic} onChange={e=>setSmmTopic(e.target.value)}
+              placeholder="Masalan: Yangi kiyim kolleksiyasi..."
+              className="w-full bg-[#1a1a1f] border border-gray-700 rounded-xl px-4 py-3 text-sm outline-none mb-4" style={{fontSize:'16px'}}/>
+
+            {/* Quick prompts grid */}
+            <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Tezkor buyruqlar</p>
+            <div className="grid grid-cols-3 gap-2 mb-4">
+              {SMM_PROMPTS.map(sp=>(
+                <button key={sp.label} onClick={()=>{ const t=sp.tmpl(smmPlatform,smmTopic||'...'); setSmmOpen(false); sendToAI(t) }}
+                  className="flex flex-col items-center gap-1.5 p-3 bg-[#111114] border border-gray-800/60 rounded-2xl active:scale-95 transition-transform active:bg-[#1a1a1f]">
+                  <span className="text-2xl">{sp.icon}</span>
+                  <span className="text-[10px] text-gray-300 font-medium text-center leading-tight">{sp.label}</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Custom prompt */}
+            <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">O'z buyrug'ingiz</p>
+            <div className="flex gap-2">
+              <input id="smm-custom" placeholder={`${smmPlatform} uchun...`}
+                className="flex-1 bg-[#1a1a1f] border border-gray-700 rounded-xl px-4 py-3 text-sm outline-none" style={{fontSize:'16px'}}/>
+              <button onClick={()=>{
+                const inp=document.getElementById('smm-custom') as HTMLInputElement
+                if(inp?.value){ setSmmOpen(false); sendToAI(`${smmPlatform} uchun ${inp.value}`) }
+              }} className="px-4 py-3 bg-pink-600 rounded-xl text-sm font-bold">Yuborish</button>
+            </div>
+
+            {/* SMM Tips */}
+            <div className="mt-4 p-4 bg-[#111114] border border-pink-500/20 rounded-2xl">
+              <p className="text-[10px] text-pink-400 font-bold uppercase tracking-wider mb-2">💡 SMM Maslahatlar</p>
+              {["Eng yaxshi post vaqti: 18:00-21:00","Stories uchun 9:16 format ishlating","Hashtag: 5-10 ta maqsadli > 30 ta umumiy","Har kuni kamida 1 ta story","Engagement uchun savol bering"].map(t=>(
+                <p key={t} className="text-[11px] text-gray-400 py-0.5">• {t}</p>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ SUPER APP ══ */}
+      {appsOpen&&(
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/80 backdrop-blur-md">
           <div className="w-full max-h-[78%] bg-[#111114] rounded-t-[28px] p-5 relative border-t border-gray-800 animate-slide-up shadow-2xl overflow-y-auto">
-            <button onClick={() => setIsAppsOpen(false)} className="absolute top-4 right-4 p-2 bg-[#1a1a1f] rounded-full"><X size={18}/></button>
+            <button onClick={()=>setAppsOpen(false)} className="absolute top-4 right-4 p-2 bg-[#1a1a1f] rounded-full"><X size={16}/></button>
             <h2 className="text-xl font-bold mb-5 mt-1">Xizmatlar</h2>
-
             {[
-              { title: '🛍 Marketpleys', apps: [
-                { icon: <ShoppingBag size={22} className="text-purple-500"/>, label: 'Uzum', url: 'https://uzum.uz', bg: 'bg-purple-600/15 border-purple-500/25' },
-                { icon: <Coffee size={22} className="text-yellow-500"/>, label: 'Lavka', url: 'https://lavka.yandex.ru/', bg: 'bg-yellow-500/15 border-yellow-500/25' },
+              {title:'🛍 Marketpleys',apps:[
+                {icon:<ShoppingBag size={20} className="text-purple-500"/>,label:'Uzum',url:'https://uzum.uz',bg:'bg-purple-600/15 border-purple-500/25'},
+                {icon:<Coffee size={20} className="text-yellow-500"/>,label:'Lavka',url:'https://lavka.yandex.ru/',bg:'bg-yellow-500/15 border-yellow-500/25'},
               ]},
-              { title: '🚕 Transport', apps: [
-                { icon: <Car size={22} className="text-yellow-400"/>, label: 'Yandex Go', url: 'https://go.yandex/', bg: 'bg-yellow-500/15 border-yellow-500/25' },
+              {title:'🚕 Transport',apps:[
+                {icon:<Car size={20} className="text-yellow-400"/>,label:'Yandex Go',url:'https://go.yandex/',bg:'bg-yellow-500/15 border-yellow-500/25'},
               ]},
-              { title: '📝 Ish va Baza', apps: [
-                { icon: <FileText size={22} className="text-white"/>, label: 'Notion', url: 'https://notion.so', bg: 'bg-gray-600/15 border-gray-500/25' },
-                { icon: <PenTool size={22} className="text-pink-400"/>, label: 'Figma', url: 'https://figma.com', bg: 'bg-pink-600/15 border-pink-500/25' },
+              {title:'📝 Ish va Baza',apps:[
+                {icon:<FileText size={20} className="text-white"/>,label:'Notion',url:'https://notion.so',bg:'bg-gray-600/15 border-gray-500/25'},
+                {icon:<PenTool size={20} className="text-pink-400"/>,label:'Figma',url:'https://figma.com',bg:'bg-pink-600/15 border-pink-500/25'},
+                {icon:<Megaphone size={20} className="text-orange-400"/>,label:'Instagram',url:'https://instagram.com',bg:'bg-orange-500/15 border-orange-500/25'},
+                {icon:<MessageCircle size={20} className="text-blue-400"/>,label:'Telegram',url:'https://web.telegram.org',bg:'bg-blue-500/15 border-blue-500/25'},
               ]},
-            ].map(section => (
-              <div key={section.title} className="mb-5">
-                <p className="text-[11px] font-bold text-gray-400 mb-3 uppercase tracking-wider">{section.title}</p>
+            ].map(sec=>(
+              <div key={sec.title} className="mb-5">
+                <p className="text-[11px] font-bold text-gray-400 mb-3 uppercase tracking-wider">{sec.title}</p>
                 <div className="grid grid-cols-4 gap-3">
-                  {section.apps.map(app => (
-                    <button key={app.label} onClick={() => { setIsAppsOpen(false); openApp(app.url) }}
-                      className="flex flex-col items-center gap-2 active:scale-90 transition-transform">
+                  {sec.apps.map(app=>(
+                    <button key={app.label} onClick={()=>{setAppsOpen(false);openApp(app.url)}} className="flex flex-col items-center gap-2 active:scale-90 transition-transform">
                       <div className={`w-14 h-14 ${app.bg} border rounded-[18px] flex items-center justify-center`}>{app.icon}</div>
-                      <span className="text-[11px] text-gray-300">{app.label}</span>
+                      <span className="text-[10px] text-gray-300">{app.label}</span>
                     </button>
                   ))}
                 </div>
