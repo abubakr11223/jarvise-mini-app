@@ -1,8 +1,8 @@
 'use client'
 import { useEffect, useState, useRef } from 'react'
-import { Mic, Search, Grid, Menu, X, Bookmark, FileText, Send, BookOpen, User, Bot, Package, CreditCard, ChevronRight, Settings, LayoutDashboard, LogOut } from 'lucide-react'
+import { Mic, Search, Grid, Menu, X, Bookmark, FileText, Send, BookOpen, User, Bot, Package, CreditCard, ChevronRight, LayoutDashboard, LogOut, ShoppingBag, Car, PenTool, Coffee, MonitorPlay, Calculator } from 'lucide-react'
 
-// 👇 O'ZINGIZNING PRODUCTION SSILKANGIZNI QO'YING:
+// 👇 PRODUCTION SSILKANGIZ:
 const N8N_WEBHOOK_URL = "https://abusaidbakrdov.app.n8n.cloud/webhook/8bafdcfb-2d60-4698-ad3e-920c16074495";
 
 export default function Home() {
@@ -10,14 +10,14 @@ export default function Home() {
   const [isRecording, setIsRecording] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
 
-  // MODAL OYNALAR HOLATI
+  // MODAL OYNALAR
   const [isAppsOpen, setIsAppsOpen] = useState(false)
   const [isKitobOpen, setIsKitobOpen] = useState(false)
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false) // YON PANEL (SUPER APP)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
 
   const [inputText, setInputText] = useState("")
   const [messages, setMessages] = useState<{ role: string, text: string }[]>([
-    { role: 'ai', text: 'Salom Xo\'jayin! Men tayyorman, nima xizmat?' }
+    { role: 'ai', text: 'Salom Xo\'jayin! Men tayyorman. Xarajatlarni aytishingiz, Notionga vazifa berishingiz yoki Super App xizmatlaridan foydalanishingiz mumkin.' }
   ])
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
@@ -43,12 +43,17 @@ export default function Home() {
     }
   }, [])
 
-  const openExternalLink = (url: string) => {
-    if (webApp) webApp.openLink(url);
-    else window.open(url, '_blank');
+  // 🚀 TELEGRAM ICHIDA OCHISH FUNKSIYASI (IN-APP BROWSER)
+  const openApp = (url: string) => {
+    if (webApp) {
+      // Telegram ichida ochish uchun rasmiy metod
+      webApp.openLink(url);
+    } else {
+      window.open(url, '_blank');
+    }
   }
 
-  // AI XABARINI CHIROYLI QILISH (Qalin yozuv va qatorlar)
+  // AI XABARINI CHIROYLI QILISH
   const formatMessage = (text: string) => {
     const lines = text.split(/\\n|\n/);
     return lines.map((line, i) => {
@@ -67,7 +72,6 @@ export default function Home() {
     });
   };
 
-  // 🚀 AI GA YUBORISH
   const sendToAI = async (text: string | null, audioBlob: Blob | null = null) => {
     setIsLoading(true);
     if (text) setMessages(prev => [...prev, { role: 'user', text: text }]);
@@ -97,7 +101,7 @@ export default function Home() {
         setMessages(prev => [...prev, { role: 'ai', text: '✅ Qabul qildim!' }]);
       }
     } catch (error) {
-      setMessages(prev => [...prev, { role: 'ai', text: `❌ Uzilish bo'ldi. N8n ishlayotganini tekshiring.` }]);
+      setMessages(prev => [...prev, { role: 'ai', text: `❌ Uzilish bo'ldi. N8n'ni tekshiring.` }]);
     } finally {
       setIsLoading(false);
       setInputText("");
@@ -131,7 +135,7 @@ export default function Home() {
     <main className="relative flex flex-col h-screen bg-[#0a0a0c] text-white font-sans overflow-hidden">
       {isLoading && <div className="absolute top-0 left-0 w-full h-1 bg-blue-500 animate-pulse z-50"></div>}
 
-      {/* 🌟 CHAP YON PANEL (SUPER APP) TRIGGER TUGMASI 🌟 */}
+      {/* 🌟 CHAP YON PANEL TUGMASI 🌟 */}
       {!isSidebarOpen && (
         <button
           onClick={() => setIsSidebarOpen(true)}
@@ -142,7 +146,7 @@ export default function Home() {
         </button>
       )}
 
-      {/* 🌟 SUPER APP SIDEBAR (OCHILADIGAN MENYU) 🌟 */}
+      {/* 🌟 YON PANEL (SUPER APP) 🌟 */}
       <div className={`fixed inset-y-0 left-0 w-[280px] bg-[#111114] z-50 transform transition-transform duration-300 ease-in-out flex flex-col border-r border-gray-800 shadow-[10px_0_30px_rgba(0,0,0,0.7)] ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="p-6 border-b border-gray-800 flex items-center gap-4 bg-[#1a1a1f]">
           <div className="w-12 h-12 bg-gradient-to-tr from-blue-600 to-purple-600 rounded-full flex items-center justify-center text-lg font-bold shadow-lg">
@@ -150,30 +154,25 @@ export default function Home() {
           </div>
           <div className="flex flex-col">
             <span className="font-bold text-sm">{userData?.first_name || 'Abubakr'}</span>
-            <span className="text-[10px] text-gray-400">Premium User</span>
+            <span className="text-[10px] text-blue-400 font-bold">Vibe Coder</span>
           </div>
         </div>
         <div className="flex-1 overflow-y-auto py-4 px-3 flex flex-col gap-2">
           <button onClick={() => { setIsSidebarOpen(false); setIsKitobOpen(true) }} className="flex items-center justify-between w-full p-3 rounded-xl hover:bg-[#1a1a1f] active:bg-[#242429] transition-colors text-left">
-            <div className="flex items-center gap-3"><BookOpen size={18} className="text-green-400" /><span className="text-sm font-medium">Qarz va Rasxodlar</span></div><ChevronRight size={16} className="text-gray-600" />
+            <div className="flex items-center gap-3"><Calculator size={18} className="text-green-400" /><span className="text-sm font-medium">Moliya / Xarajat</span></div><ChevronRight size={16} className="text-gray-600" />
           </button>
-          <button onClick={() => { setIsSidebarOpen(false); openExternalLink('https://notion.so') }} className="flex items-center justify-between w-full p-3 rounded-xl hover:bg-[#1a1a1f] active:bg-[#242429] transition-colors text-left">
-            <div className="flex items-center gap-3"><FileText size={18} className="text-white" /><span className="text-sm font-medium">Notion Bazasi</span></div><ChevronRight size={16} className="text-gray-600" />
+          <button onClick={() => { setIsSidebarOpen(false); openApp('https://notion.so') }} className="flex items-center justify-between w-full p-3 rounded-xl hover:bg-[#1a1a1f] active:bg-[#242429] transition-colors text-left">
+            <div className="flex items-center gap-3"><FileText size={18} className="text-white" /><span className="text-sm font-medium">Notion Baza</span></div><ChevronRight size={16} className="text-gray-600" />
           </button>
           <button onClick={() => { setIsSidebarOpen(false); setIsAppsOpen(true) }} className="flex items-center justify-between w-full p-3 rounded-xl hover:bg-[#1a1a1f] active:bg-[#242429] transition-colors text-left">
             <div className="flex items-center gap-3"><LayoutDashboard size={18} className="text-blue-400" /><span className="text-sm font-medium">Barcha Ilovalar</span></div><ChevronRight size={16} className="text-gray-600" />
           </button>
         </div>
-        <div className="p-4 border-t border-gray-800">
-          <button onClick={() => setIsSidebarOpen(false)} className="flex items-center gap-3 text-red-400 p-3 rounded-xl w-full hover:bg-red-500/10 active:bg-red-500/20 transition-colors">
-            <LogOut size={18} /><span className="text-sm font-medium">Yopish</span>
-          </button>
-        </div>
       </div>
-      {/* SIDEBAR QORA FONI */}
       {isSidebarOpen && <div onClick={() => setIsSidebarOpen(false)} className="fixed inset-0 bg-black/60 z-40 backdrop-blur-sm transition-opacity"></div>}
 
 
+      {/* 🌟 ASOSIY CHAT QISMI 🌟 */}
       <header className="flex justify-between items-center w-full px-4 py-4 bg-[#111114] border-b border-gray-800/50 shrink-0">
         <div className="w-8 h-8 rounded-full border border-gray-700 bg-[#242429] flex justify-center items-center"><Menu size={16} className="text-gray-400" /></div>
         <div className="flex flex-col items-center">
@@ -186,17 +185,17 @@ export default function Home() {
       {/* GORIZONTAL TEZKOR TUGMALAR */}
       <div className="w-full overflow-x-auto scrollbar-hide shrink-0 bg-[#111114] pb-3 pt-2">
         <div className="flex gap-2 px-4 w-max">
-          <button onClick={() => setIsKitobOpen(true)} className="bg-[#1a1a1f] border border-green-500/30 rounded-full px-4 py-2 flex items-center gap-2 active:scale-95 transition-transform">
-            <BookOpen size={14} className="text-green-400" />
-            <span className="text-xs font-medium">Qarz/Rasxod</span>
-          </button>
-          <button onClick={() => openExternalLink('https://notion.so')} className="bg-[#1a1a1f] border border-gray-700 rounded-full px-4 py-2 flex items-center gap-2 active:scale-95 transition-transform">
-            <FileText size={14} className="text-white" />
-            <span className="text-xs font-medium">Notion</span>
-          </button>
-          <button onClick={() => setIsAppsOpen(true)} className="bg-[#1a1a1f] border border-gray-700 rounded-full px-4 py-2 flex items-center gap-2 active:scale-95 transition-transform">
+          <button onClick={() => setIsAppsOpen(true)} className="bg-[#1a1a1f] border border-blue-500/30 rounded-full px-4 py-2 flex items-center gap-2 active:scale-95 transition-transform">
             <Grid size={14} className="text-blue-400" />
-            <span className="text-xs font-medium">Ilovalar</span>
+            <span className="text-xs font-medium">Super App</span>
+          </button>
+          <button onClick={() => openApp('https://uzum.uz')} className="bg-[#1a1a1f] border border-gray-700 rounded-full px-4 py-2 flex items-center gap-2 active:scale-95 transition-transform">
+            <ShoppingBag size={14} className="text-purple-400" />
+            <span className="text-xs font-medium">Uzum</span>
+          </button>
+          <button onClick={() => openApp('https://go.yandex/')} className="bg-[#1a1a1f] border border-gray-700 rounded-full px-4 py-2 flex items-center gap-2 active:scale-95 transition-transform">
+            <Car size={14} className="text-yellow-400" />
+            <span className="text-xs font-medium">Taxi</span>
           </button>
         </div>
       </div>
@@ -210,7 +209,6 @@ export default function Home() {
             </div>
             <div className={`max-w-[85%] rounded-2xl p-3.5 text-[15px] leading-relaxed shadow-sm ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-tr-sm' : 'bg-[#1a1a1f] text-gray-300 rounded-tl-sm border border-gray-800'
               }`}>
-              {/* XABARNI CHIROYLI QILIB CHIQARISH */}
               {msg.role === 'ai' ? formatMessage(msg.text) : msg.text}
             </div>
           </div>
@@ -226,7 +224,7 @@ export default function Home() {
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && sendToAI(inputText)}
-              placeholder="Xabar yozing..."
+              placeholder="Xarajat yozing yoki buyruq bering..."
               style={{ fontSize: '16px' }}
               className="bg-transparent border-none outline-none text-white w-full placeholder-gray-500 py-3"
             />
@@ -244,21 +242,25 @@ export default function Home() {
         </div>
       </div>
 
-      {/* 📚 QARZ VA RASXOD MODALI */}
+      {/* 📚 XARAJATLAR / MOLIYA MODALI */}
       {isKitobOpen && (
         <div className="fixed inset-0 z-50 flex flex-col bg-[#0a0a0c] animate-slide-up">
           <header className="flex justify-between items-center p-4 border-b border-gray-800 bg-[#111114]">
-            <h2 className="text-lg font-bold flex items-center gap-2"><BookOpen className="text-green-500" /> Qarz va Rasxod</h2>
+            <h2 className="text-lg font-bold flex items-center gap-2"><Calculator className="text-green-500" /> Moliya va Xarajat</h2>
             <button onClick={() => setIsKitobOpen(false)} className="p-2 bg-[#1a1a1f] rounded-full text-gray-400"><X size={20} /></button>
           </header>
           <div className="flex-1 p-4 overflow-y-auto">
+            <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-4 mb-4">
+              <p className="text-sm text-blue-200">💡 <b>Jarvisga ayting:</b> "Bugun tushlikka 50 ming so'm ketdi" yoki "Notiondan xarajatlarimni hisoblab ber". U hammasini o'zi to'g'rilaydi!</p>
+            </div>
             <div className="bg-[#111114] rounded-2xl border border-gray-800 shadow-xl overflow-hidden">
               <table className="w-full text-left text-[14px]">
                 <thead className="bg-[#1a1a1f] text-gray-400 text-xs uppercase">
-                  <tr><th className="p-4 font-medium">Kim/Nima</th><th className="p-4 font-medium">Summa</th><th className="p-4 font-medium">Holat</th></tr>
+                  <tr><th className="p-4 font-medium">Toifa</th><th className="p-4 font-medium">Summa</th><th className="p-4 font-medium">Holat</th></tr>
                 </thead>
                 <tbody className="divide-y divide-gray-800/50">
-                  <tr><td className="p-4">Hasanboy</td><td className="p-4 text-red-400 font-medium">-$500</td><td className="p-4"><span className="bg-red-500/10 border border-red-500/20 text-red-400 px-2 py-1 rounded text-[10px] uppercase font-bold">Qarz</span></td></tr>
+                  <tr><td className="p-4">Ovqatlanish</td><td className="p-4 text-red-400 font-medium">50,000 UZS</td><td className="p-4"><span className="bg-red-500/10 border border-red-500/20 text-red-400 px-2 py-1 rounded text-[10px] uppercase font-bold">Xarajat</span></td></tr>
+                  <tr><td className="p-4">Savdo</td><td className="p-4 text-green-400 font-medium">$1,200</td><td className="p-4"><span className="bg-green-500/10 border border-green-500/20 text-green-400 px-2 py-1 rounded text-[10px] uppercase font-bold">Kirim</span></td></tr>
                 </tbody>
               </table>
             </div>
@@ -266,16 +268,33 @@ export default function Home() {
         </div>
       )}
 
-      {/* 📱 BARCHA ILOVALAR MODALI */}
+      {/* 📱 SUPER APP BARCHA ILOVALAR KANALOGI (2-rasmdagi kabi) */}
       {isAppsOpen && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/80 backdrop-blur-sm">
-          <div className="w-full h-[50%] bg-[#111114] rounded-t-[30px] p-6 relative border-t border-gray-800 animate-slide-up shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/80 backdrop-blur-md">
+          <div className="w-full h-[75%] bg-[#111114] rounded-t-[30px] p-6 relative border-t border-gray-800 animate-slide-up shadow-[0_-10px_40px_rgba(0,0,0,0.5)] overflow-y-auto">
             <button onClick={() => setIsAppsOpen(false)} className="absolute top-4 right-4 p-2 bg-[#1a1a1f] rounded-full text-gray-400"><X size={20} /></button>
-            <h3 className="text-xl font-bold mb-6 mt-2 text-white">Xizmatlar</h3>
-            <div className="grid grid-cols-4 gap-4">
-              <button onClick={() => openExternalLink('https://uzum.uz')} className="flex flex-col items-center gap-3 active:scale-95 transition-transform"><div className="w-14 h-14 bg-[#1a1a1f] border border-gray-800 rounded-2xl flex items-center justify-center shadow-lg"><Package size={24} className="text-purple-500" /></div><span className="text-xs text-gray-300">Uzum</span></button>
-              <button className="flex flex-col items-center gap-3 active:scale-95 transition-transform"><div className="w-14 h-14 bg-[#1a1a1f] border border-gray-800 rounded-2xl flex items-center justify-center shadow-lg"><CreditCard size={24} className="text-blue-500" /></div><span className="text-xs text-gray-300">Moliya</span></button>
+            <h2 className="text-2xl font-bold mb-6 mt-2 text-white">Все сервисы</h2>
+
+            {/* Marketpleyslar */}
+            <h3 className="text-sm font-bold text-gray-400 mb-3 uppercase tracking-wider">🛍 Marketpleys</h3>
+            <div className="grid grid-cols-4 gap-4 mb-6">
+              <button onClick={() => openApp('https://uzum.uz')} className="flex flex-col items-center gap-2 active:scale-95 transition-transform"><div className="w-14 h-14 bg-purple-600/20 border border-purple-500/30 rounded-[18px] flex items-center justify-center shadow-lg"><ShoppingBag size={24} className="text-purple-500" /></div><span className="text-[11px] text-gray-300">Uzum</span></button>
+              <button onClick={() => openApp('https://lavka.yandex.ru/')} className="flex flex-col items-center gap-2 active:scale-95 transition-transform"><div className="w-14 h-14 bg-yellow-500/20 border border-yellow-500/30 rounded-[18px] flex items-center justify-center shadow-lg"><Coffee size={24} className="text-yellow-500" /></div><span className="text-[11px] text-gray-300">Lavka</span></button>
             </div>
+
+            {/* Transport */}
+            <h3 className="text-sm font-bold text-gray-400 mb-3 uppercase tracking-wider">🚕 Transport</h3>
+            <div className="grid grid-cols-4 gap-4 mb-6">
+              <button onClick={() => openApp('https://go.yandex/')} className="flex flex-col items-center gap-2 active:scale-95 transition-transform"><div className="w-14 h-14 bg-yellow-500/20 border border-yellow-500/30 rounded-[18px] flex items-center justify-center shadow-lg"><Car size={24} className="text-yellow-400" /></div><span className="text-[11px] text-gray-300">Yandex Go</span></button>
+            </div>
+
+            {/* Ish va Dizayn */}
+            <h3 className="text-sm font-bold text-gray-400 mb-3 uppercase tracking-wider">📝 Ish va Baza</h3>
+            <div className="grid grid-cols-4 gap-4 mb-6">
+              <button onClick={() => openApp('https://notion.so')} className="flex flex-col items-center gap-2 active:scale-95 transition-transform"><div className="w-14 h-14 bg-gray-600/20 border border-gray-500/30 rounded-[18px] flex items-center justify-center shadow-lg"><FileText size={24} className="text-white" /></div><span className="text-[11px] text-gray-300">Notion</span></button>
+              <button onClick={() => openApp('https://figma.com')} className="flex flex-col items-center gap-2 active:scale-95 transition-transform"><div className="w-14 h-14 bg-pink-600/20 border border-pink-500/30 rounded-[18px] flex items-center justify-center shadow-lg"><PenTool size={24} className="text-pink-400" /></div><span className="text-[11px] text-gray-300">Figma</span></button>
+            </div>
+
           </div>
         </div>
       )}
