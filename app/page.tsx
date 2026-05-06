@@ -1,24 +1,58 @@
 'use client'
 import { useEffect, useState, useRef } from 'react'
-import { Mic, Search, Grid, Menu, X, Bookmark, FileText, Send, User, Bot, ChevronRight, LayoutDashboard, ShoppingBag, Car, PenTool, Coffee, Calculator, ArrowLeft, RefreshCw, Globe } from 'lucide-react'
+import { Mic, Grid, Menu, X, Bookmark, FileText, Send, User, Bot, ChevronRight, LayoutDashboard, ShoppingBag, Car, PenTool, Coffee, Calculator, RefreshCw, Globe, MicOff } from 'lucide-react'
 
 const N8N_WEBHOOK_URL = "/api/chat"
+
+// Web Speech API type declarations
+interface ISpeechRecognition extends EventTarget {
+  lang: string
+  continuous: boolean
+  interimResults: boolean
+  maxAlternatives: number
+  start(): void
+  stop(): void
+  abort(): void
+  onstart: (() => void) | null
+  onend: (() => void) | null
+  onresult: ((event: ISpeechRecognitionEvent) => void) | null
+  onerror: ((event: ISpeechRecognitionErrorEvent) => void) | null
+}
+interface ISpeechRecognitionEvent {
+  results: SpeechRecognitionResultList
+  resultIndex: number
+}
+interface ISpeechRecognitionErrorEvent {
+  error: string
+  message: string
+}
+declare global {
+  interface Window {
+    SpeechRecognition: new () => ISpeechRecognition
+    webkitSpeechRecognition: new () => ISpeechRecognition
+  }
+}
 
 export default function Home() {
   const [userData, setUserData] = useState<any>(null)
   const [isRecording, setIsRecording] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [interimText, setInterimText] = useState("") // Real-time ovoz matni
 
   const [isAppsOpen, setIsAppsOpen] = useState(false)
   const [isKitobOpen, setIsKitobOpen] = useState(false)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+  const [voiceLang, setVoiceLang] = useState<'uz-UZ' | 'ru-RU'>('uz-UZ')
 
   const [inputText, setInputText] = useState("")
-  const [messages, setMessages] = useState<{ role: string, text: string }[]>([
-    { role: 'ai', text: 'Salom! Men **JONKA** — sizning aqlli yordamchingizman 🤖\n\nMen qila oladiganlarim:\n📊 **Xarajat/daromat yozish** — "Bugun 50,000 so\'m xarajat qildim"\n📅 **Google Calendar** — "Ertaga 14:00 da uchrashuv qo\'sh"\n📝 **Notion** — "Yangi sahifa och: Loyiha rejasi"\n🔍 **Qidiruv** — "OpenAI haqida qidir"\n\nRus tilida ham gaplashavering! 🇷🇺🇺🇿' }
+  const [messages, setMessages] = useState<{ role: string; text: string }[]>([
+    {
+      role: 'ai',
+      text: 'Salom! Men **JONKA** — sizning aqlli yordamchingizman 🤖\n\nQila oladiganlarim:\n📊 **Xarajat yozish** — "Bugun kafe da 45,000 so\'m xarajat"\n📅 **Calendar** — "Ertaga 14:00 da uchrashuv qo\'sh"\n📝 **Notion** — "Yangi sahifa: Loyiha rejasi"\n🔍 **Qidiruv** — "Python haqida ma\'lumot ber"\n\nRus tilida ham gapiravering! 🇺🇿🇷🇺\nMikrofon tugmasini bosib ovozli buyruq bering 🎤'
+    }
   ])
 
-  const [expenses, setExpenses] = useState<{ id: number, name: string, amount: number, type: string }[]>([
+  const [expenses, setExpenses] = useState<{ id: number; name: string; amount: number; type: string }[]>([
     { id: 1, name: 'Ovqatlanish', amount: 50000, type: 'XARAJAT' }
   ])
 
@@ -27,8 +61,7 @@ export default function Home() {
   const [browserLoading, setBrowserLoading] = useState(false)
   const iframeRef = useRef<HTMLIFrameElement>(null)
 
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-  const audioChunksRef = useRef<BlobPart[]>([])
+  const recognitionRef = useRef<ISpeechRecognition | null>(null)
   const chatEndRef = useRef<HTMLDivElement>(null)
   const [webApp, setWebApp] = useState<any>(null)
 
@@ -50,10 +83,7 @@ export default function Home() {
     }
   }, [])
 
-  // Mini app ichida ochish — iframe overlay
-  const openApp = (url: string) => {
-    setBrowserUrl(url)
-  }
+  const openApp = (url: string) => setBrowserUrl(url)
 
   const formatMessage = (text: string) => {
     const lines = text.split(/\\n|\n/)
@@ -61,57 +91,45 @@ export default function Home() {
       const parts = line.split(/(\*\*.*?\*\*)/g)
       return (
         <span key={i}>
-          {parts.map((part, j) => {
-            if (part.startsWith('**') && part.endsWith('**')) {
-              return <strong key={j} className="text-white font-bold">{part.slice(2, -2)}</strong>
-            }
-            return part
-          })}
+          {parts.map((part, j) =>
+            part.startsWith('**') && part.endsWith('**')
+              ? <strong key={j} className="text-white font-bold">{part.slice(2, -2)}</strong>
+              : part
+          )}
           {i !== lines.length - 1 && <br />}
         </span>
       )
     })
   }
 
-  const sendToAI = async (text: string | null, audioBlob: Blob | null = null) => {
-    if (!text?.trim() && !audioBlob) return
+  const sendToAI = async (text: string) => {
+    if (!text.trim()) return
     setIsLoading(true)
-    if (text) setMessages(prev => [...prev, { role: 'user', text }])
-    if (audioBlob) setMessages(prev => [...prev, { role: 'user', text: '🎤 Ovozli xabar...' }])
+    setInputText("")
+    setInterimText("")
+    setMessages(prev => [...prev, { role: 'user', text }])
 
     try {
-      let response
-      if (audioBlob) {
-        const ext = audioBlob.type.includes('ogg') ? 'ogg' : audioBlob.type.includes('mp4') ? 'mp4' : 'webm'
-        const formData = new FormData()
-        formData.append('audio', audioBlob, `voice.${ext}`)
-        formData.append('user_id', userData?.id?.toString() || '0')
-        formData.append('username', userData?.username || userData?.first_name || 'Foydalanuvchi')
-        formData.append('is_voice', 'yes')
-        response = await fetch(N8N_WEBHOOK_URL, { method: 'POST', body: formData })
-      } else {
-        response = await fetch(N8N_WEBHOOK_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            message: text,
-            user_id: userData?.id || 0,
-            username: userData?.username || userData?.first_name || 'Foydalanuvchi',
-          }),
-        })
-      }
+      const response = await fetch(N8N_WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: text,
+          user_id: userData?.id || 0,
+          username: userData?.username || userData?.first_name || 'Foydalanuvchi',
+        }),
+      })
 
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}))
-        const errMsg = (errData as { error?: string }).error || `Server xatosi: ${response.status}`
-        throw new Error(errMsg)
+        throw new Error((errData as { error?: string }).error || `Xato: ${response.status}`)
       }
 
       const data = await response.json()
       let replyText: string = data?.reply || data?.response || data?.text || data?.message || data?.output || ''
 
       if (replyText) {
-        // [EXPENSE:...] pattern orqali xarajat qo'shish
+        // [EXPENSE:...] pattern
         const expenseMatch = replyText.match(/\[EXPENSE:(.*?)\|(.*?)\|(.*?)\]/i)
         if (expenseMatch) {
           setExpenses(prev => [{
@@ -123,7 +141,7 @@ export default function Home() {
           replyText = replyText.replace(/\[EXPENSE:.*?\]/gi, '').trim()
         }
 
-        // Smart parser — proxy ajratib yuborgan xarajat
+        // Smart parser fallback
         if (!expenseMatch && data?.expense) {
           const exp = data.expense as { name: string; amount: number; type: string }
           setExpenses(prev => [{ id: Date.now(), ...exp }, ...prev])
@@ -138,39 +156,84 @@ export default function Home() {
       setMessages(prev => [...prev, { role: 'ai', text: `❌ ${msg}` }])
     } finally {
       setIsLoading(false)
-      setInputText("")
     }
   }
 
-  const toggleRecording = async () => {
+  // =============================================
+  // 🎤 WEB SPEECH API — ovozni brauzer ichida
+  //    matnga aylantiradi, n8n ga matn yuboradi
+  // =============================================
+  const toggleRecording = () => {
     if (isRecording) {
-      mediaRecorderRef.current?.stop()
+      recognitionRef.current?.stop()
       setIsRecording(false)
-    } else {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-          ? 'audio/webm;codecs=opus'
-          : MediaRecorder.isTypeSupported('audio/webm')
-          ? 'audio/webm'
-          : MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')
-          ? 'audio/ogg;codecs=opus'
-          : 'audio/mp4'
-        const recorder = new MediaRecorder(stream, { mimeType })
-        audioChunksRef.current = []
-        recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data) }
-        recorder.onstop = () => {
-          const audioBlob = new Blob(audioChunksRef.current, { type: mimeType })
-          stream.getTracks().forEach(t => t.stop())
-          sendToAI(null, audioBlob)
+      setInterimText("")
+      return
+    }
+
+    const SpeechRecognitionAPI =
+      (typeof window !== 'undefined') &&
+      (window.SpeechRecognition || window.webkitSpeechRecognition)
+
+    if (!SpeechRecognitionAPI) {
+      setMessages(prev => [...prev, {
+        role: 'ai',
+        text: '❌ Brauzeringiz ovoz tanishni qo\'llab-quvvatlamaydi. Iltimos Chrome yoki Telegram ilovasini ishlating.'
+      }])
+      return
+    }
+
+    const recognition = new SpeechRecognitionAPI()
+    recognition.lang = voiceLang         // 'uz-UZ' yoki 'ru-RU'
+    recognition.continuous = false
+    recognition.interimResults = true    // Real-time ko'rish
+    recognition.maxAlternatives = 1
+
+    let finalText = ''
+
+    recognition.onstart = () => {
+      setIsRecording(true)
+      setInterimText("")
+    }
+
+    recognition.onresult = (event: ISpeechRecognitionEvent) => {
+      let interim = ''
+      finalText = ''
+      for (let i = 0; i < event.results.length; i++) {
+        if (event.results[i].isFinal) {
+          finalText += event.results[i][0].transcript
+        } else {
+          interim += event.results[i][0].transcript
         }
-        recorder.start()
-        mediaRecorderRef.current = recorder
-        setIsRecording(true)
-      } catch {
-        setMessages(prev => [...prev, { role: 'ai', text: "❌ Mikrofon ruxsati yo'q! Sozlamalardan ruxsat bering." }])
+      }
+      // Input maydonida real-time ko'rsatish
+      setInterimText(finalText || interim)
+    }
+
+    recognition.onend = () => {
+      setIsRecording(false)
+      setInterimText("")
+      if (finalText.trim()) {
+        sendToAI(finalText.trim())
       }
     }
+
+    recognition.onerror = (event: ISpeechRecognitionErrorEvent) => {
+      setIsRecording(false)
+      setInterimText("")
+      const errMap: Record<string, string> = {
+        'no-speech': '🔇 Ovoz eshitilmadi. Qayta urinib ko\'ring.',
+        'audio-capture': '🎤 Mikrofon ruxsati yo\'q!',
+        'not-allowed': '🔒 Mikrofon ruxsati berilmagan. Brauzer sozlamalarini tekshiring.',
+        'network': '🌐 Tarmoq xatosi.',
+        'aborted': '',
+      }
+      const msg = errMap[event.error]
+      if (msg) setMessages(prev => [...prev, { role: 'ai', text: msg }])
+    }
+
+    recognition.start()
+    recognitionRef.current = recognition
   }
 
   return (
@@ -180,8 +243,7 @@ export default function Home() {
       {/* ===== IN-APP BROWSER ===== */}
       {browserUrl && (
         <div className="fixed inset-0 z-[200] flex flex-col bg-white">
-          {/* Browser header */}
-          <div className="flex items-center gap-2 px-3 py-2 bg-[#111114] border-b border-gray-800 shrink-0 safe-top">
+          <div className="flex items-center gap-2 px-3 py-2 bg-[#111114] border-b border-gray-800 shrink-0">
             <button
               onClick={() => setBrowserUrl(null)}
               className="p-2 rounded-full bg-[#1a1a1f] active:bg-[#242429]"
@@ -244,18 +306,37 @@ export default function Home() {
           <button onClick={() => { setIsSidebarOpen(false); setIsAppsOpen(true) }} className="flex items-center justify-between w-full p-3 rounded-xl hover:bg-[#1a1a1f] active:bg-[#242429] transition-colors text-left">
             <div className="flex items-center gap-3"><LayoutDashboard size={18} className="text-blue-400" /><span className="text-sm font-medium">Barcha Ilovalar</span></div><ChevronRight size={16} className="text-gray-600" />
           </button>
+
+          {/* Til tanlash */}
+          <div className="mt-4 px-1">
+            <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Ovoz tili</p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setVoiceLang('uz-UZ')}
+                className={`flex-1 py-2 rounded-xl text-xs font-bold transition-colors ${voiceLang === 'uz-UZ' ? 'bg-blue-600 text-white' : 'bg-[#1a1a1f] text-gray-400'}`}
+              >
+                🇺🇿 O'zbek
+              </button>
+              <button
+                onClick={() => setVoiceLang('ru-RU')}
+                className={`flex-1 py-2 rounded-xl text-xs font-bold transition-colors ${voiceLang === 'ru-RU' ? 'bg-blue-600 text-white' : 'bg-[#1a1a1f] text-gray-400'}`}
+              >
+                🇷🇺 Русский
+              </button>
+            </div>
+          </div>
         </div>
       </div>
       {isSidebarOpen && <div onClick={() => setIsSidebarOpen(false)} className="fixed inset-0 bg-black/60 z-40 backdrop-blur-sm"></div>}
 
       {/* ===== HEADER ===== */}
       <header className="flex justify-between items-center w-full px-4 py-4 bg-[#111114] border-b border-gray-800/50 shrink-0">
-        <button onClick={() => setIsSidebarOpen(true)} className="w-8 h-8 rounded-full border border-gray-700 bg-[#242429] flex justify-center items-center">
+        <button onClick={() => setIsSidebarOpen(true)} className="w-8 h-8 rounded-full border border-gray-700 bg-[#242429] flex justify-center items-center active:bg-[#333]">
           <Menu size={16} className="text-gray-400" />
         </button>
         <div className="flex flex-col items-center">
           <span className="text-white font-bold text-sm">JONKA ✨</span>
-          <span className="text-[10px] text-green-400">Online</span>
+          <span className="text-[10px] text-green-400">● Online · {voiceLang === 'uz-UZ' ? "O'zbek" : 'Русский'}</span>
         </div>
         <div className="flex gap-2"><Bookmark size={20} className="text-gray-400" /></div>
       </header>
@@ -279,7 +360,7 @@ export default function Home() {
       </div>
 
       {/* ===== CHAT ===== */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-4 pb-[80px]">
+      <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-4 pb-[90px]">
         {messages.map((msg, idx) => (
           <div key={idx} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
             <div className="flex items-center gap-1.5 mb-1 opacity-50 px-1">
@@ -295,15 +376,17 @@ export default function Home() {
             </div>
           </div>
         ))}
+
+        {/* Typing indicator */}
         {isLoading && (
           <div className="flex flex-col items-start">
             <div className="flex items-center gap-1.5 mb-1 opacity-50 px-1">
               <Bot size={10} /><span className="text-[9px] uppercase font-bold tracking-wider">JONKA</span>
             </div>
-            <div className="bg-[#1a1a1f] rounded-2xl rounded-tl-sm border border-gray-800 p-3.5 flex gap-1.5">
-              <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
-              <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
-              <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+            <div className="bg-[#1a1a1f] border border-gray-800 rounded-2xl rounded-tl-sm p-4 flex gap-1.5 items-center">
+              <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+              <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+              <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
             </div>
           </div>
         )}
@@ -312,6 +395,16 @@ export default function Home() {
 
       {/* ===== INPUT ===== */}
       <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-[#0a0a0c] via-[#0a0a0c] to-transparent z-10">
+        {/* Recording indicator */}
+        {isRecording && (
+          <div className="flex items-center gap-2 mb-2 px-4 py-2 bg-red-500/10 border border-red-500/30 rounded-2xl">
+            <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
+            <span className="text-red-400 text-xs font-medium">
+              {interimText || (voiceLang === 'uz-UZ' ? 'Gapiring...' : 'Говорите...')}
+            </span>
+          </div>
+        )}
+
         <div className="flex items-end gap-2">
           <div className="flex-1 bg-[#1a1a1f] rounded-3xl flex items-center px-4 py-1.5 border border-gray-700/80 shadow-lg min-h-[52px]">
             <input
@@ -319,18 +412,33 @@ export default function Home() {
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendToAI(inputText) } }}
-              placeholder="JONKA ga yozing..."
+              placeholder={isRecording ? (interimText || '🎤 Tinglanyapti...') : 'JONKA ga yozing...'}
               style={{ fontSize: '16px' }}
               className="bg-transparent border-none outline-none text-white w-full placeholder-gray-500 py-3"
             />
           </div>
+
           {inputText.trim().length > 0 ? (
-            <button onClick={() => sendToAI(inputText)} className="w-[52px] h-[52px] shrink-0 rounded-full flex items-center justify-center bg-blue-600 shadow-lg shadow-blue-600/30 active:scale-90 transition-transform">
+            <button
+              onClick={() => sendToAI(inputText)}
+              disabled={isLoading}
+              className="w-[52px] h-[52px] shrink-0 rounded-full flex items-center justify-center bg-blue-600 shadow-lg shadow-blue-600/30 active:scale-90 transition-transform disabled:opacity-50"
+            >
               <Send size={20} className="text-white ml-[-2px]" />
             </button>
           ) : (
-            <button onClick={toggleRecording} className={`w-[52px] h-[52px] shrink-0 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 ${isRecording ? 'bg-red-500 shadow-red-500/40 animate-pulse scale-110' : 'bg-[#1a1a1f] border border-gray-700/80 active:scale-90'}`}>
-              <Mic size={22} className={isRecording ? 'text-white' : 'text-blue-400'} />
+            <button
+              onClick={toggleRecording}
+              className={`w-[52px] h-[52px] shrink-0 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 ${
+                isRecording
+                  ? 'bg-red-500 shadow-red-500/40 scale-110'
+                  : 'bg-[#1a1a1f] border border-gray-700/80 active:scale-90'
+              }`}
+            >
+              {isRecording
+                ? <MicOff size={20} className="text-white" />
+                : <Mic size={22} className="text-blue-400" />
+              }
             </button>
           )}
         </div>
@@ -344,17 +452,16 @@ export default function Home() {
             <button onClick={() => setIsKitobOpen(false)} className="p-2 bg-[#1a1a1f] rounded-full text-gray-400"><X size={20} /></button>
           </header>
 
-          {/* Jami */}
           <div className="px-4 pt-4 grid grid-cols-2 gap-3 shrink-0">
             <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4">
               <p className="text-xs text-red-400 mb-1">Jami Xarajat</p>
-              <p className="text-lg font-bold text-red-400">
+              <p className="text-base font-bold text-red-400">
                 -{expenses.filter(e => e.type === 'XARAJAT').reduce((s, e) => s + e.amount, 0).toLocaleString()} UZS
               </p>
             </div>
             <div className="bg-green-500/10 border border-green-500/20 rounded-2xl p-4">
               <p className="text-xs text-green-400 mb-1">Jami Daromat</p>
-              <p className="text-lg font-bold text-green-400">
+              <p className="text-base font-bold text-green-400">
                 +{expenses.filter(e => e.type !== 'XARAJAT').reduce((s, e) => s + e.amount, 0).toLocaleString()} UZS
               </p>
             </div>
@@ -396,16 +503,16 @@ export default function Home() {
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/80 backdrop-blur-md">
           <div className="w-full h-[75%] bg-[#111114] rounded-t-[30px] p-6 relative border-t border-gray-800 animate-slide-up shadow-[0_-10px_40px_rgba(0,0,0,0.5)] overflow-y-auto">
             <button onClick={() => setIsAppsOpen(false)} className="absolute top-4 right-4 p-2 bg-[#1a1a1f] rounded-full text-gray-400"><X size={20} /></button>
-            <h2 className="text-2xl font-bold mb-6 mt-2 text-white">Xizmatlar</h2>
+            <h2 className="text-2xl font-bold mb-6 mt-2">Xizmatlar</h2>
 
             <h3 className="text-sm font-bold text-gray-400 mb-3 uppercase tracking-wider">🛍 Marketpleys</h3>
             <div className="grid grid-cols-4 gap-4 mb-6">
               <button onClick={() => { setIsAppsOpen(false); openApp('https://uzum.uz') }} className="flex flex-col items-center gap-2 active:scale-95 transition-transform">
-                <div className="w-14 h-14 bg-purple-600/20 border border-purple-500/30 rounded-[18px] flex items-center justify-center shadow-lg"><ShoppingBag size={24} className="text-purple-500" /></div>
+                <div className="w-14 h-14 bg-purple-600/20 border border-purple-500/30 rounded-[18px] flex items-center justify-center"><ShoppingBag size={24} className="text-purple-500" /></div>
                 <span className="text-[11px] text-gray-300">Uzum</span>
               </button>
               <button onClick={() => { setIsAppsOpen(false); openApp('https://lavka.yandex.ru/') }} className="flex flex-col items-center gap-2 active:scale-95 transition-transform">
-                <div className="w-14 h-14 bg-yellow-500/20 border border-yellow-500/30 rounded-[18px] flex items-center justify-center shadow-lg"><Coffee size={24} className="text-yellow-500" /></div>
+                <div className="w-14 h-14 bg-yellow-500/20 border border-yellow-500/30 rounded-[18px] flex items-center justify-center"><Coffee size={24} className="text-yellow-500" /></div>
                 <span className="text-[11px] text-gray-300">Lavka</span>
               </button>
             </div>
@@ -413,7 +520,7 @@ export default function Home() {
             <h3 className="text-sm font-bold text-gray-400 mb-3 uppercase tracking-wider">🚕 Transport</h3>
             <div className="grid grid-cols-4 gap-4 mb-6">
               <button onClick={() => { setIsAppsOpen(false); openApp('https://go.yandex/') }} className="flex flex-col items-center gap-2 active:scale-95 transition-transform">
-                <div className="w-14 h-14 bg-yellow-500/20 border border-yellow-500/30 rounded-[18px] flex items-center justify-center shadow-lg"><Car size={24} className="text-yellow-400" /></div>
+                <div className="w-14 h-14 bg-yellow-500/20 border border-yellow-500/30 rounded-[18px] flex items-center justify-center"><Car size={24} className="text-yellow-400" /></div>
                 <span className="text-[11px] text-gray-300">Yandex Go</span>
               </button>
             </div>
@@ -421,11 +528,11 @@ export default function Home() {
             <h3 className="text-sm font-bold text-gray-400 mb-3 uppercase tracking-wider">📝 Ish va Baza</h3>
             <div className="grid grid-cols-4 gap-4 mb-6">
               <button onClick={() => { setIsAppsOpen(false); openApp('https://notion.so') }} className="flex flex-col items-center gap-2 active:scale-95 transition-transform">
-                <div className="w-14 h-14 bg-gray-600/20 border border-gray-500/30 rounded-[18px] flex items-center justify-center shadow-lg"><FileText size={24} className="text-white" /></div>
+                <div className="w-14 h-14 bg-gray-600/20 border border-gray-500/30 rounded-[18px] flex items-center justify-center"><FileText size={24} className="text-white" /></div>
                 <span className="text-[11px] text-gray-300">Notion</span>
               </button>
               <button onClick={() => { setIsAppsOpen(false); openApp('https://figma.com') }} className="flex flex-col items-center gap-2 active:scale-95 transition-transform">
-                <div className="w-14 h-14 bg-pink-600/20 border border-pink-500/30 rounded-[18px] flex items-center justify-center shadow-lg"><PenTool size={24} className="text-pink-400" /></div>
+                <div className="w-14 h-14 bg-pink-600/20 border border-pink-500/30 rounded-[18px] flex items-center justify-center"><PenTool size={24} className="text-pink-400" /></div>
                 <span className="text-[11px] text-gray-300">Figma</span>
               </button>
             </div>
