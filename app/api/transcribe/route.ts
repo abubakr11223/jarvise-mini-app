@@ -9,14 +9,16 @@ export async function POST(request: NextRequest) {
     const audio    = formData.get('audio') as File | null
     if (!audio) return NextResponse.json({ error: 'Audio fayl topilmadi' }, { status: 400 })
 
-    const language = (formData.get('language') as string) || 'uz'
+    const language = (formData.get('language') as string) || 'ru'
 
-    // ── ElevenLabs Scribe — eng yaxshi o'zbek/rus tili (agar kalit bo'lsa) ──
+    // ── ElevenLabs Scribe — rus tili uchun eng yaxshi ──────────────────────
     if (ELEVENLABS_API_KEY) {
       const el = new FormData()
       el.append('file', audio, 'audio.webm')
       el.append('model_id', 'scribe_v1')
-      el.append('language_code', language === 'ru' ? 'ru' : 'uz')
+      el.append('language_code', language)
+      el.append('tag_audio_events', 'false')  // tezroq — musiqa/shovqin tahlilini o'chiradi
+      el.append('num_speakers', '1')           // tezroq — 1 kishi gapiradi
 
       const res = await fetch('https://api.elevenlabs.io/v1/speech-to-text', {
         method: 'POST',
@@ -31,16 +33,15 @@ export async function POST(request: NextRequest) {
 
     // ── Groq Whisper fallback ──────────────────────────────────────────────
     if (!GROQ_API_KEY) {
-      return NextResponse.json({ error: 'GROQ_API_KEY yoki ELEVENLABS_API_KEY kerak' }, { status: 500 })
+      return NextResponse.json({ error: 'API kalit kerak' }, { status: 500 })
     }
 
     const gf = new FormData()
     gf.append('file', audio, 'audio.webm')
-    gf.append('model', 'whisper-large-v3')   // turbo emas — aniqroq model
+    gf.append('model', 'whisper-large-v3')
     gf.append('language', language)
     gf.append('response_format', 'json')
-    // Vocabulary hint — o'zbek moliya so'zlari uchun
-    gf.append('prompt', "xarajat, daromat, qarz, so'm, ming, berdim, oldim, kafeda, taksi, maosh, oziq-ovqat, supermarket")
+    gf.append('prompt', 'расход, доход, долг, рублей, тысяч, заплатил, купил, кафе, такси, зарплата, перевёл')
 
     const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
       method: 'POST',
@@ -57,7 +58,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ text: data.text || '' })
   } catch (error) {
     return NextResponse.json(
-      { error: 'Transkriptsiya xatosi: ' + (error instanceof Error ? error.message : String(error)) },
+      { error: 'Xato: ' + (error instanceof Error ? error.message : String(error)) },
       { status: 500 }
     )
   }

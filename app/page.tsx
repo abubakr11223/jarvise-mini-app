@@ -185,7 +185,7 @@ export default function Home() {
   const [isLoading,  setIsLoading]  = useState(false)
   const [isRecording,setIsRecording]= useState(false)
   const [interimText,setInterimText]= useState('')
-  const [voiceLang,  setVoiceLang]  = useState<'uz-UZ' | 'ru-RU'>('uz-UZ')
+  const [voiceLang,  setVoiceLang]  = useState<'uz-UZ' | 'ru-RU'>('ru-RU')
   const [inputText,  setInputText]  = useState('')
   const [voiceCountdown, setVoiceCountdown] = useState<number | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -462,7 +462,7 @@ export default function Home() {
       : 'audio/ogg;codecs=opus'
     let recorder: MediaRecorder
     try {
-      recorder = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 64000 })
+      recorder = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 32000 })
     } catch {
       stream.getTracks().forEach(t => t.stop())
       setMessages(p => [...p, { role: 'ai', text: "❌ Audio yozib bo'lmadi." }])
