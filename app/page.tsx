@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { Mic, Grid, Menu, X, Bookmark, FileText, Send, User, Bot, ChevronRight,
   LayoutDashboard, ShoppingBag, Car, PenTool, Coffee, Calculator,
-  MicOff, TrendingDown, TrendingUp, Trash2,
+  MicOff, TrendingDown, TrendingUp, Trash2, Clock, Search,
   HandCoins, CheckSquare, Square, MessageCircle, Megaphone } from 'lucide-react'
 
 const N8N_WEBHOOK_URL = "/api/chat"
@@ -188,6 +188,8 @@ export default function Home() {
   const [voiceLang,  setVoiceLang]  = useState<'uz-UZ' | 'ru-RU'>('uz-UZ')
   const [inputText,  setInputText]  = useState('')
   const [voiceCountdown, setVoiceCountdown] = useState<number | null>(null)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [searchHistory, setSearchHistory] = useState<string[]>(() => load('j_history', []))
 
   // Modals
   const [sidebar,   setSidebar]    = useState(false)
@@ -228,12 +230,13 @@ export default function Home() {
   const pendingVoiceRef = useRef('')
 
   // Persist
-  useEffect(() => { save('j_exp',    expenses)    }, [expenses])
-  useEffect(() => { save('j_debt',   debts)       }, [debts])
-  useEffect(() => { save('j_shop',   shopItems)   }, [shopItems])
-  useEffect(() => { save('j_budget', budget)      }, [budget])
-  useEffect(() => { save('j_brand',  brand)       }, [brand])
-  useEffect(() => { save('j_bank',   contentBank) }, [contentBank])
+  useEffect(() => { save('j_exp',     expenses)      }, [expenses])
+  useEffect(() => { save('j_debt',    debts)         }, [debts])
+  useEffect(() => { save('j_shop',    shopItems)     }, [shopItems])
+  useEffect(() => { save('j_budget',  budget)        }, [budget])
+  useEffect(() => { save('j_brand',   brand)         }, [brand])
+  useEffect(() => { save('j_bank',    contentBank)   }, [contentBank])
+  useEffect(() => { save('j_history', searchHistory) }, [searchHistory])
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
   useEffect(() => {
@@ -282,9 +285,16 @@ export default function Home() {
   const addShop = (text: string) => { if (!text.trim()) return; setShopItems(p => [...p, { id: Date.now(), text: text.trim(), done: false }]) }
 
   // ─── AI call ──────────────────────────────────────────────────────────────
+  const addToHistory = (text: string) => {
+    const t = text.trim()
+    if (!t || t.length < 3) return
+    setSearchHistory(p => [t, ...p.filter(h => h !== t)].slice(0, 30))
+  }
+
   const sendToAI = async (text: string, skipLocalParse = false) => {
     if (!text.trim() || isLoading) return
-    setInputText(''); setInterimText('')
+    setInputText(''); setInterimText(''); setHistoryOpen(false)
+    addToHistory(text)
 
     const lower = text.toLowerCase()
     const isViewCmd = lower.includes("ko'rsat") || lower.includes('корсат') || lower.includes('показ') || lower.includes('chiqar') || lower.includes('hisobot') || lower.includes('qancha')
@@ -641,6 +651,37 @@ export default function Home() {
 
       {/* ══ INPUT ══ */}
       <div className="absolute bottom-0 left-0 right-0 px-3 pb-4 pt-2 bg-gradient-to-t from-[#0a0a0c] via-[#0a0a0c]/95 to-transparent z-10">
+
+        {/* ── TARIX PANELI ── */}
+        {historyOpen && searchHistory.length > 0 && (
+          <div className="mb-2 bg-[#111114] border border-gray-800/80 rounded-2xl overflow-hidden shadow-2xl">
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-800/60">
+              <div className="flex items-center gap-2">
+                <Clock size={12} className="text-gray-500" />
+                <span className="text-[11px] text-gray-400 font-semibold">So'nggi qidiruvlar</span>
+              </div>
+              <button onClick={() => { setSearchHistory([]); setHistoryOpen(false) }}
+                className="text-[10px] text-red-400 px-2 py-0.5 bg-red-500/10 rounded-full">
+                Tozalash
+              </button>
+            </div>
+            <div className="max-h-[220px] overflow-y-auto">
+              {searchHistory.map((h, i) => (
+                <button key={i}
+                  onClick={() => { setInputText(h); setHistoryOpen(false) }}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-[#1a1a1f] active:bg-[#242429] transition-colors text-left group">
+                  <Search size={12} className="text-gray-600 shrink-0 group-hover:text-blue-400" />
+                  <span className="text-[13px] text-gray-300 truncate flex-1">{h}</span>
+                  <button onClick={e => { e.stopPropagation(); setSearchHistory(p => p.filter((_, j) => j !== i)) }}
+                    className="opacity-0 group-hover:opacity-100 p-1 rounded-lg transition-opacity">
+                    <X size={10} className="text-gray-500" />
+                  </button>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Voice recording indicator */}
         {isRecording && (
           <div className="flex items-center gap-2 mb-2 px-3.5 py-2 bg-red-500/10 border border-red-500/30 rounded-2xl">
@@ -655,8 +696,9 @@ export default function Home() {
             <button onClick={() => { cancelVoiceSend(); }} className="text-[11px] text-red-400 font-bold px-2 py-0.5 bg-red-500/10 rounded-full">Bekor</button>
           </div>
         )}
+
         <div className="flex items-end gap-2">
-          {/* Mic — har doim ko'rinadi, chapda */}
+          {/* Mic — har doim ko'rinadi */}
           <button onClick={toggleRec}
             className={`w-[48px] h-[48px] shrink-0 rounded-full flex items-center justify-center transition-all shadow-lg ${
               isRecording
@@ -667,13 +709,25 @@ export default function Home() {
           </button>
 
           {/* Input */}
-          <div className="flex-1 bg-[#1a1a1f] rounded-3xl flex items-center px-4 border border-gray-700/80 min-h-[48px]">
+          <div className="flex-1 bg-[#1a1a1f] rounded-3xl flex items-center px-4 border border-gray-700/80 min-h-[48px] relative">
             <input type="text" value={inputText}
               onChange={e => { setInputText(e.target.value); if (voiceCountdown !== null) cancelVoiceSend() }}
-              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); cancelVoiceSend(); sendToAI(inputText) } }}
+              onFocus={() => { if (!inputText && searchHistory.length > 0) setHistoryOpen(true) }}
+              onBlur={() => setTimeout(() => setHistoryOpen(false), 150)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); cancelVoiceSend(); sendToAI(inputText) }
+                if (e.key === 'Escape') setHistoryOpen(false)
+              }}
               placeholder={isRecording ? '🎤 Tinglanyapti...' : 'JONKA ga yozing...'}
               style={{ fontSize: '16px' }}
               className="bg-transparent border-none outline-none text-white w-full placeholder-gray-500 py-3" />
+            {/* Tarix tugmasi — input ichida o'ngda */}
+            {!inputText && searchHistory.length > 0 && (
+              <button onMouseDown={e => { e.preventDefault(); setHistoryOpen(p => !p) }}
+                className="shrink-0 p-1.5 rounded-full hover:bg-[#242429] transition-colors">
+                <Clock size={14} className="text-gray-500" />
+              </button>
+            )}
           </div>
 
           {/* Send — faqat matn bo'lsa */}
