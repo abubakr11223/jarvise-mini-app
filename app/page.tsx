@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { Mic, Search, Grid, Menu, X, Bookmark, FileText, Send, BookOpen, User, Bot, Package, CreditCard, ChevronRight, LayoutDashboard, LogOut, ShoppingBag, Car, PenTool, Coffee, MonitorPlay, Calculator } from 'lucide-react'
 
-// 👇 PRODUCTION SSILKANGIZ:
+// 👇 O'ZINGIZNING PRODUCTION SSILKANGIZ:
 const N8N_WEBHOOK_URL = "https://abusaidbakrdov.app.n8n.cloud/webhook/8bafdcfb-2d60-4698-ad3e-920c16074495";
 
 export default function Home() {
@@ -16,8 +16,9 @@ export default function Home() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
 
   const [inputText, setInputText] = useState("")
+  // 🌟 BRAND O'ZGARDI: JONKA 🌟
   const [messages, setMessages] = useState<{ role: string, text: string }[]>([
-    { role: 'ai', text: 'Salom Xo\'jayin! Men tayyorman. Xarajatlarni aytishingiz, Notionga vazifa berishingiz yoki Super App xizmatlaridan foydalanishingiz mumkin.' }
+    { role: 'ai', text: 'Salom! Men **JONKA** - sizning aqlli yordamchingizman 🤖. Xarajatlarni aytishingiz, Notionga vazifa berishingiz yoki Super App xizmatlaridan foydalanishingiz mumkin.' }
   ])
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
@@ -43,17 +44,17 @@ export default function Home() {
     }
   }, [])
 
-  // 🚀 TELEGRAM ICHIDA OCHISH FUNKSIYASI (IN-APP BROWSER)
+  // 🚀 TELEGRAM ICHKI BRAUZERIDA OCHISH (Tashqariga otib yubormaydi)
   const openApp = (url: string) => {
-    if (webApp) {
-      // Telegram ichida ochish uchun rasmiy metod
+    if (webApp && webApp.openLink) {
+      // Bu funksiya saytni Telegram ichida ochadi
       webApp.openLink(url);
     } else {
       window.open(url, '_blank');
     }
   }
 
-  // AI XABARINI CHIROYLI QILISH
+  // AI XABARINI CHIROYLI QILISH (Abzas va Qalin yozuvlar)
   const formatMessage = (text: string) => {
     const lines = text.split(/\\n|\n/);
     return lines.map((line, i) => {
@@ -126,7 +127,7 @@ export default function Home() {
         mediaRecorderRef.current = recorder;
         setIsRecording(true);
       } catch (err) {
-        alert("Mikrofon ruxsati yo'q!");
+        alert("Mikrofon ruxsati yo'q! Sozlamalardan ruxsat bering.");
       }
     }
   }
@@ -154,7 +155,7 @@ export default function Home() {
           </div>
           <div className="flex flex-col">
             <span className="font-bold text-sm">{userData?.first_name || 'Abubakr'}</span>
-            <span className="text-[10px] text-blue-400 font-bold">Vibe Coder</span>
+            <span className="text-[10px] text-blue-400 font-bold">JONKA Foydalanuvchisi</span>
           </div>
         </div>
         <div className="flex-1 overflow-y-auto py-4 px-3 flex flex-col gap-2">
@@ -176,7 +177,8 @@ export default function Home() {
       <header className="flex justify-between items-center w-full px-4 py-4 bg-[#111114] border-b border-gray-800/50 shrink-0">
         <div className="w-8 h-8 rounded-full border border-gray-700 bg-[#242429] flex justify-center items-center"><Menu size={16} className="text-gray-400" /></div>
         <div className="flex flex-col items-center">
-          <span className="text-white font-bold text-sm">Jarvis AI</span>
+          {/* BRAND JONKA */}
+          <span className="text-white font-bold text-sm">JONKA ✨</span>
           <span className="text-[10px] text-green-400">Online</span>
         </div>
         <div className="flex gap-2"><Bookmark size={20} className="text-gray-400" /></div>
@@ -205,7 +207,8 @@ export default function Home() {
           <div key={idx} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
             <div className="flex items-center gap-1.5 mb-1 opacity-50 px-1">
               {msg.role === 'user' ? <User size={10} /> : <Bot size={10} />}
-              <span className="text-[9px] uppercase font-bold tracking-wider">{msg.role === 'user' ? 'Siz' : 'Jarvis'}</span>
+              {/* Ismlar JONKA ga o'zgardi */}
+              <span className="text-[9px] uppercase font-bold tracking-wider">{msg.role === 'user' ? 'Siz' : 'JONKA'}</span>
             </div>
             <div className={`max-w-[85%] rounded-2xl p-3.5 text-[15px] leading-relaxed shadow-sm ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-tr-sm' : 'bg-[#1a1a1f] text-gray-300 rounded-tl-sm border border-gray-800'
               }`}>
@@ -224,7 +227,7 @@ export default function Home() {
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && sendToAI(inputText)}
-              placeholder="Xarajat yozing yoki buyruq bering..."
+              placeholder="JONKA ga yozing..."
               style={{ fontSize: '16px' }}
               className="bg-transparent border-none outline-none text-white w-full placeholder-gray-500 py-3"
             />
@@ -251,7 +254,7 @@ export default function Home() {
           </header>
           <div className="flex-1 p-4 overflow-y-auto">
             <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-4 mb-4">
-              <p className="text-sm text-blue-200">💡 <b>Jarvisga ayting:</b> "Bugun tushlikka 50 ming so'm ketdi" yoki "Notiondan xarajatlarimni hisoblab ber". U hammasini o'zi to'g'rilaydi!</p>
+              <p className="text-sm text-blue-200">💡 <b>JONKA ga ayting:</b> "Bugun tushlikka 50 ming so'm ketdi" yoki "Notiondan xarajatlarimni hisoblab ber". U hammasini o'zi to'g'rilaydi!</p>
             </div>
             <div className="bg-[#111114] rounded-2xl border border-gray-800 shadow-xl overflow-hidden">
               <table className="w-full text-left text-[14px]">
@@ -268,12 +271,12 @@ export default function Home() {
         </div>
       )}
 
-      {/* 📱 SUPER APP BARCHA ILOVALAR KANALOGI (2-rasmdagi kabi) */}
+      {/* 📱 SUPER APP BARCHA ILOVALAR KANALOGI */}
       {isAppsOpen && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/80 backdrop-blur-md">
           <div className="w-full h-[75%] bg-[#111114] rounded-t-[30px] p-6 relative border-t border-gray-800 animate-slide-up shadow-[0_-10px_40px_rgba(0,0,0,0.5)] overflow-y-auto">
             <button onClick={() => setIsAppsOpen(false)} className="absolute top-4 right-4 p-2 bg-[#1a1a1f] rounded-full text-gray-400"><X size={20} /></button>
-            <h2 className="text-2xl font-bold mb-6 mt-2 text-white">Все сервисы</h2>
+            <h2 className="text-2xl font-bold mb-6 mt-2 text-white">Xizmatlar</h2>
 
             {/* Marketpleyslar */}
             <h3 className="text-sm font-bold text-gray-400 mb-3 uppercase tracking-wider">🛍 Marketpleys</h3>
