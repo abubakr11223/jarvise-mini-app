@@ -444,6 +444,61 @@ export default function Home() {
     }
   }
 
+  // MediaRecorder + Groq Whisper — Android Telegram WebView fallback
+  const startMediaRecorderFn = async (existingStream?: MediaStream) => {
+    let stream = existingStream
+    if (!stream) {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      } catch {
+        setMessages(p => [...p, { role: 'ai', text: "🔒 Mikrofon ruxsati yo'q." }])
+        return
+      }
+    }
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus'
+      : MediaRecorder.isTypeSupported('audio/webm')
+      ? 'audio/webm'
+      : 'audio/ogg;codecs=opus'
+    let recorder: MediaRecorder
+    try {
+      recorder = new MediaRecorder(stream, { mimeType })
+    } catch {
+      stream.getTracks().forEach(t => t.stop())
+      setMessages(p => [...p, { role: 'ai', text: "❌ Audio yozib bo'lmadi." }])
+      return
+    }
+    audioChunksRef.current = []
+    recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data) }
+    recorder.onstop = async () => {
+      stream!.getTracks().forEach(t => t.stop())
+      const blob = new Blob(audioChunksRef.current, { type: mimeType })
+      audioChunksRef.current = []
+      if (blob.size < 1000) { setIsRecording(false); setInterimText(''); return }
+      setInterimText('🔄 Ovoz matnga aylantirilmoqda...')
+      try {
+        const fd = new FormData()
+        fd.append('audio', blob, 'audio.webm')
+        fd.append('language', voiceLang === 'ru-RU' ? 'ru' : 'uz')
+        const res = await fetch('/api/transcribe', { method: 'POST', body: fd })
+        const data = await res.json()
+        finishVoice(data.text || '')
+      } catch {
+        setIsRecording(false); setInterimText('')
+        setMessages(p => [...p, { role: 'ai', text: "❌ Ovozni matnga aylantirishda xato." }])
+      }
+    }
+    try {
+      recorder.start()
+      mediaRecorderRef.current = recorder
+      setIsRecording(true); setInterimText('🎙 Gapiring...')
+    } catch {
+      stream.getTracks().forEach(t => t.stop())
+      setIsRecording(false); setInterimText('')
+      setMessages(p => [...p, { role: 'ai', text: "❌ Mikrofon ishga tushmadi." }])
+    }
+  }
+
   const toggleRec = async () => {
     if (isRecording) {
       recognitionRef.current?.stop()
@@ -452,7 +507,6 @@ export default function Home() {
     }
     cancelVoiceSend()
 
-    // Ask microphone permission first
     let stream: MediaStream
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true })
@@ -464,13 +518,10 @@ export default function Home() {
     const SpeechAPI = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition)
 
     if (SpeechAPI) {
-      // ── Web Speech API path (Chrome desktop, some browsers) ──
+      // Web Speech API — try first, fall back to MediaRecorder on service-not-allowed
       stream.getTracks().forEach(t => t.stop())
       let r: ISpeechRecognition
-      try { r = new SpeechAPI() } catch {
-        setMessages(p => [...p, { role: 'ai', text: "❌ Mikrofon ishga tushmadi." }])
-        return
-      }
+      try { r = new SpeechAPI() } catch { await startMediaRecorderFn(); return }
       r.lang = voiceLang; r.continuous = false; r.interimResults = true; r.maxAlternatives = 1
       let fin = ''
       r.onresult = (e) => {
@@ -482,15 +533,16 @@ export default function Home() {
         setInterimText(fin || interim)
       }
       r.onend = () => finishVoice(fin)
-      r.onerror = (e) => {
+      r.onerror = async (e) => {
         setIsRecording(false); setInterimText('')
+        if (e.error === 'service-not-allowed' || e.error === 'not-allowed') {
+          await startMediaRecorderFn(); return
+        }
         const errMap: Record<string, string> = {
-          'no-speech':           '🔇 Ovoz eshitilmadi. Qayta urinib ko\'ring.',
-          'not-allowed':         "🔒 Mikrofon bloklangan.",
-          'network':             '🌐 Tarmoq xatosi.',
-          'aborted':             '',
-          'audio-capture':       '🎙 Mikrofon topilmadi.',
-          'service-not-allowed': '🎙 Ovoz xizmati bloklangan.',
+          'no-speech':     "🔇 Ovoz eshitilmadi. Qayta urinib ko'ring.",
+          'network':       '🌐 Tarmoq xatosi.',
+          'aborted':       '',
+          'audio-capture': '🎙 Mikrofon topilmadi.',
         }
         const msg = errMap[e.error]
         if (msg) setMessages(p => [...p, { role: 'ai', text: msg }])
@@ -498,58 +550,10 @@ export default function Home() {
       try {
         r.start(); setIsRecording(true); setInterimText('')
         recognitionRef.current = r
-      } catch {
-        setIsRecording(false)
-        setMessages(p => [...p, { role: 'ai', text: "❌ Mikrofon ishga tushmadi." }])
-      }
+      } catch { setIsRecording(false); await startMediaRecorderFn() }
     } else {
-      // ── MediaRecorder + Groq Whisper fallback (Android Telegram WebView) ──
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : MediaRecorder.isTypeSupported('audio/webm')
-        ? 'audio/webm'
-        : 'audio/ogg;codecs=opus'
-
-      let recorder: MediaRecorder
-      try {
-        recorder = new MediaRecorder(stream, { mimeType })
-      } catch {
-        stream.getTracks().forEach(t => t.stop())
-        setMessages(p => [...p, { role: 'ai', text: "❌ Audio yozib bo'lmadi." }])
-        return
-      }
-
-      audioChunksRef.current = []
-      recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data) }
-      recorder.onstop = async () => {
-        stream.getTracks().forEach(t => t.stop())
-        const blob = new Blob(audioChunksRef.current, { type: mimeType })
-        audioChunksRef.current = []
-        if (blob.size < 1000) { setIsRecording(false); setInterimText(''); return }
-
-        setInterimText('🔄 Ovoz matnga aylantirilmoqda...')
-        try {
-          const fd = new FormData()
-          fd.append('audio', blob, 'audio.webm')
-          fd.append('language', voiceLang === 'ru-RU' ? 'ru' : 'uz')
-          const res = await fetch('/api/transcribe', { method: 'POST', body: fd })
-          const data = await res.json()
-          finishVoice(data.text || '')
-        } catch {
-          setIsRecording(false); setInterimText('')
-          setMessages(p => [...p, { role: 'ai', text: "❌ Ovozni matnga aylantirishda xato." }])
-        }
-      }
-
-      try {
-        recorder.start()
-        mediaRecorderRef.current = recorder
-        setIsRecording(true); setInterimText('🎙 Gapiring...')
-      } catch {
-        stream.getTracks().forEach(t => t.stop())
-        setIsRecording(false); setInterimText('')
-        setMessages(p => [...p, { role: 'ai', text: "❌ Mikrofon ishga tushmadi." }])
-      }
+      // No Speech API — go straight to MediaRecorder (Android Telegram WebView)
+      await startMediaRecorderFn(stream)
     }
   }
 
