@@ -415,26 +415,34 @@ export default function Home() {
     pendingVoiceRef.current = ''
   }
 
-  const toggleRec = () => {
+  const toggleRec = async () => {
     if (isRecording) { recognitionRef.current?.stop(); return }
     cancelVoiceSend()
 
+    // iOS / Android Telegram WebView uchun avval getUserMedia bilan ruxsat so'raymiz
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      stream.getTracks().forEach(t => t.stop()) // ruxsat olindi, stream kerak emas
+    } catch {
+      setMessages(p => [...p, { role: 'ai', text: "🔒 **Mikrofon ruxsati yo'q**\n\n📱 iPhone: Sozlamalar → Telegram → Mikrofon → yoqing\n🤖 Android: Telegram → Ilova sozlamalari → Ruxsatlar → Mikrofon" }])
+      return
+    }
+
     const API = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition)
     if (!API) {
-      setMessages(p => [...p, { role: 'ai', text: "❌ Bu qurilmada ovoz tanish ishlamaydi.\n\nAndroid Telegram da Web Speech API qo'llab-quvvatlanmaydi. Matn yozing yoki Chrome brauzerida oching." }])
+      setMessages(p => [...p, { role: 'ai', text: "❌ Bu qurilmada ovoz tanish (Speech API) mavjud emas.\n\nAndroid Telegram WebView qo'llab-quvvatlamaydi. Iltimos matn yozing." }])
       return
     }
 
     let r: ISpeechRecognition
     try { r = new API() } catch {
-      setMessages(p => [...p, { role: 'ai', text: "❌ Mikrofon ishga tushmadi. Qurilma ruxsatini tekshiring." }])
+      setMessages(p => [...p, { role: 'ai', text: "❌ Mikrofon ishga tushmadi." }])
       return
     }
 
     r.lang = voiceLang; r.continuous = false; r.interimResults = true; r.maxAlternatives = 1
     let fin = ''
 
-    r.onstart  = () => { setIsRecording(true); setInterimText('') }
     r.onresult = (e) => {
       fin = ''; let interim = ''
       for (let i = 0; i < e.results.length; i++) {
@@ -466,11 +474,12 @@ export default function Home() {
     r.onerror = (e) => {
       setIsRecording(false); setInterimText('')
       const errMap: Record<string, string> = {
-        'no-speech':   '🔇 Ovoz eshitilmadi. Qayta bosing.',
-        'not-allowed': "🔒 Mikrofon ruxsati berilmagan.\nTelefon sozlamalaridan Telegram ga mikrofon ruxsatini bering.",
-        'network':     '🌐 Tarmoq xatosi. Internet aloqasini tekshiring.',
-        'aborted':     '',
+        'no-speech':     '🔇 Ovoz eshitilmadi. Qayta urinib ko\'ring.',
+        'not-allowed':   "🔒 Mikrofon bloklangan.\niPhone: Sozlamalar → Telegram → Mikrofon",
+        'network':       '🌐 Tarmoq xatosi.',
+        'aborted':       '',
         'audio-capture': '🎙 Mikrofon topilmadi.',
+        'service-not-allowed': "❌ Bu brauzerda Speech API ishlamaydi.",
       }
       const msg = errMap[e.error]
       if (msg) setMessages(p => [...p, { role: 'ai', text: msg }])
@@ -478,10 +487,11 @@ export default function Home() {
 
     try {
       r.start()
+      setIsRecording(true); setInterimText('') // darhol visual feedback
       recognitionRef.current = r
     } catch {
       setIsRecording(false)
-      setMessages(p => [...p, { role: 'ai', text: "❌ Mikrofon ishga tushmadi. Qurilma ruxsatini tekshiring." }])
+      setMessages(p => [...p, { role: 'ai', text: "❌ Mikrofon ishga tushmadi." }])
     }
   }
 
@@ -698,18 +708,15 @@ export default function Home() {
         )}
 
         <div className="flex items-end gap-2">
-          {/* Mic — har doim ko'rinadi */}
-          <button onClick={toggleRec}
-            className={`w-[48px] h-[48px] shrink-0 rounded-full flex items-center justify-center transition-all shadow-lg ${
-              isRecording
-                ? 'bg-red-500 scale-110 shadow-red-500/30'
-                : 'bg-[#1a1a1f] border border-gray-700/80 active:scale-90'
-            }`}>
-            {isRecording ? <MicOff size={19} className="text-white" /> : <Mic size={20} className="text-blue-400" />}
-          </button>
-
           {/* Input */}
-          <div className="flex-1 bg-[#1a1a1f] rounded-3xl flex items-center px-4 border border-gray-700/80 min-h-[48px] relative">
+          <div className="flex-1 bg-[#1a1a1f] rounded-3xl flex items-center px-4 border border-gray-700/80 min-h-[52px] relative">
+            {/* Tarix tugmasi — input ichida chapda */}
+            {!inputText && searchHistory.length > 0 && (
+              <button onMouseDown={e => { e.preventDefault(); setHistoryOpen(p => !p) }}
+                className="shrink-0 p-1 mr-2 rounded-full transition-colors">
+                <Clock size={14} className="text-gray-500" />
+              </button>
+            )}
             <input type="text" value={inputText}
               onChange={e => { setInputText(e.target.value); if (voiceCountdown !== null) cancelVoiceSend() }}
               onFocus={() => { if (!inputText && searchHistory.length > 0) setHistoryOpen(true) }}
@@ -720,21 +727,23 @@ export default function Home() {
               }}
               placeholder={isRecording ? '🎤 Tinglanyapti...' : 'JONKA ga yozing...'}
               style={{ fontSize: '16px' }}
-              className="bg-transparent border-none outline-none text-white w-full placeholder-gray-500 py-3" />
-            {/* Tarix tugmasi — input ichida o'ngda */}
-            {!inputText && searchHistory.length > 0 && (
-              <button onMouseDown={e => { e.preventDefault(); setHistoryOpen(p => !p) }}
-                className="shrink-0 p-1.5 rounded-full hover:bg-[#242429] transition-colors">
-                <Clock size={14} className="text-gray-500" />
-              </button>
-            )}
+              className="bg-transparent border-none outline-none text-white w-full placeholder-gray-500 py-3.5" />
           </div>
 
-          {/* Send — faqat matn bo'lsa */}
-          {inputText.trim() && (
+          {/* O'ngda: Send (matn bo'lsa) yoki Mic (har doim) */}
+          {inputText.trim() ? (
             <button onClick={() => { cancelVoiceSend(); sendToAI(inputText) }} disabled={isLoading}
-              className="w-[48px] h-[48px] shrink-0 rounded-full bg-blue-600 shadow-lg shadow-blue-600/30 flex items-center justify-center active:scale-90 disabled:opacity-40">
-              <Send size={18} className="text-white ml-[-1px]" />
+              className="w-[52px] h-[52px] shrink-0 rounded-full bg-blue-600 shadow-lg shadow-blue-600/30 flex items-center justify-center active:scale-90 disabled:opacity-40">
+              <Send size={19} className="text-white ml-[-2px]" />
+            </button>
+          ) : (
+            <button onClick={toggleRec}
+              className={`w-[52px] h-[52px] shrink-0 rounded-full flex items-center justify-center transition-all shadow-lg ${
+                isRecording
+                  ? 'bg-red-500 scale-110 shadow-red-500/30'
+                  : 'bg-[#1a1a1f] border border-gray-700/80 active:scale-90'
+              }`}>
+              {isRecording ? <MicOff size={20} className="text-white" /> : <Mic size={21} className="text-blue-400" />}
             </button>
           )}
         </div>
