@@ -398,10 +398,22 @@ export default function Home() {
   const toggleRec = () => {
     if (isRecording) { recognitionRef.current?.stop(); return }
     cancelVoiceSend()
+
     const API = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition)
-    if (!API) { setMessages(p => [...p, { role: 'ai', text: "❌ Brauzeringiz ovoz tanishni qo'llab-quvvatlamaydi." }]); return }
-    const r = new API(); r.lang = voiceLang; r.continuous = false; r.interimResults = true; r.maxAlternatives = 1
+    if (!API) {
+      setMessages(p => [...p, { role: 'ai', text: "❌ Bu qurilmada ovoz tanish ishlamaydi.\n\nAndroid Telegram da Web Speech API qo'llab-quvvatlanmaydi. Matn yozing yoki Chrome brauzerida oching." }])
+      return
+    }
+
+    let r: ISpeechRecognition
+    try { r = new API() } catch {
+      setMessages(p => [...p, { role: 'ai', text: "❌ Mikrofon ishga tushmadi. Qurilma ruxsatini tekshiring." }])
+      return
+    }
+
+    r.lang = voiceLang; r.continuous = false; r.interimResults = true; r.maxAlternatives = 1
     let fin = ''
+
     r.onstart  = () => { setIsRecording(true); setInterimText('') }
     r.onresult = (e) => {
       fin = ''; let interim = ''
@@ -414,10 +426,8 @@ export default function Home() {
     r.onend = () => {
       setIsRecording(false); setInterimText('')
       if (!fin.trim()) return
-      // Show transcribed text in input field so user can see it
       setInputText(fin.trim())
       pendingVoiceRef.current = fin.trim()
-      // Auto-send countdown: 2 seconds, user can cancel or edit
       let count = 2
       setVoiceCountdown(count)
       voiceTimerRef.current = setInterval(() => {
@@ -427,11 +437,7 @@ export default function Home() {
           voiceTimerRef.current = null
           setVoiceCountdown(null)
           const pending = pendingVoiceRef.current
-          if (pending) {
-            pendingVoiceRef.current = ''
-            setInputText('')
-            sendToAI(pending)
-          }
+          if (pending) { pendingVoiceRef.current = ''; setInputText(''); sendToAI(pending) }
         } else {
           setVoiceCountdown(count)
         }
@@ -439,10 +445,24 @@ export default function Home() {
     }
     r.onerror = (e) => {
       setIsRecording(false); setInterimText('')
-      const msgs: Record<string, string> = { 'no-speech': '🔇 Ovoz eshitilmadi.', 'not-allowed': "🔒 Mikrofon ruxsati yo'q.", 'network': '🌐 Tarmoq xatosi.' }
-      const msg = msgs[e.error]; if (msg) setMessages(p => [...p, { role: 'ai', text: msg }])
+      const errMap: Record<string, string> = {
+        'no-speech':   '🔇 Ovoz eshitilmadi. Qayta bosing.',
+        'not-allowed': "🔒 Mikrofon ruxsati berilmagan.\nTelefon sozlamalaridan Telegram ga mikrofon ruxsatini bering.",
+        'network':     '🌐 Tarmoq xatosi. Internet aloqasini tekshiring.',
+        'aborted':     '',
+        'audio-capture': '🎙 Mikrofon topilmadi.',
+      }
+      const msg = errMap[e.error]
+      if (msg) setMessages(p => [...p, { role: 'ai', text: msg }])
     }
-    r.start(); recognitionRef.current = r
+
+    try {
+      r.start()
+      recognitionRef.current = r
+    } catch {
+      setIsRecording(false)
+      setMessages(p => [...p, { role: 'ai', text: "❌ Mikrofon ishga tushmadi. Qurilma ruxsatini tekshiring." }])
+    }
   }
 
   // ─── Content bank ─────────────────────────────────────────────────────────
@@ -645,19 +665,31 @@ export default function Home() {
           </div>
         )}
         <div className="flex items-end gap-2">
-          <div className="flex-1 bg-[#1a1a1f] rounded-3xl flex items-center px-4 border border-gray-700/80 min-h-[52px]">
-            <input type="text" value={inputText} onChange={e => { setInputText(e.target.value); if (voiceCountdown !== null) cancelVoiceSend() }}
+          {/* Mic — har doim ko'rinadi, chapda */}
+          <button onClick={toggleRec}
+            className={`w-[48px] h-[48px] shrink-0 rounded-full flex items-center justify-center transition-all shadow-lg ${
+              isRecording
+                ? 'bg-red-500 scale-110 shadow-red-500/30'
+                : 'bg-[#1a1a1f] border border-gray-700/80 active:scale-90'
+            }`}>
+            {isRecording ? <MicOff size={19} className="text-white" /> : <Mic size={20} className="text-blue-400" />}
+          </button>
+
+          {/* Input */}
+          <div className="flex-1 bg-[#1a1a1f] rounded-3xl flex items-center px-4 border border-gray-700/80 min-h-[48px]">
+            <input type="text" value={inputText}
+              onChange={e => { setInputText(e.target.value); if (voiceCountdown !== null) cancelVoiceSend() }}
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); cancelVoiceSend(); sendToAI(inputText) } }}
               placeholder={isRecording ? '🎤 Tinglanyapti...' : 'JONKA ga yozing...'}
-              style={{ fontSize: '16px' }} className="bg-transparent border-none outline-none text-white w-full placeholder-gray-500 py-3.5" />
+              style={{ fontSize: '16px' }}
+              className="bg-transparent border-none outline-none text-white w-full placeholder-gray-500 py-3" />
           </div>
-          {inputText.trim() ? (
-            <button onClick={() => { cancelVoiceSend(); sendToAI(inputText) }} disabled={isLoading} className="w-[52px] h-[52px] shrink-0 rounded-full bg-blue-600 shadow-lg shadow-blue-600/30 flex items-center justify-center active:scale-90 disabled:opacity-40">
-              <Send size={19} className="text-white ml-[-2px]" />
-            </button>
-          ) : (
-            <button onClick={toggleRec} className={`w-[52px] h-[52px] shrink-0 rounded-full flex items-center justify-center shadow-lg transition-all ${isRecording ? 'bg-red-500 scale-110' : 'bg-[#1a1a1f] border border-gray-700/80 active:scale-90'}`}>
-              {isRecording ? <MicOff size={20} className="text-white" /> : <Mic size={21} className="text-blue-400" />}
+
+          {/* Send — faqat matn bo'lsa */}
+          {inputText.trim() && (
+            <button onClick={() => { cancelVoiceSend(); sendToAI(inputText) }} disabled={isLoading}
+              className="w-[48px] h-[48px] shrink-0 rounded-full bg-blue-600 shadow-lg shadow-blue-600/30 flex items-center justify-center active:scale-90 disabled:opacity-40">
+              <Send size={18} className="text-white ml-[-1px]" />
             </button>
           )}
         </div>
