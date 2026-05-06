@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { Mic, Grid, Menu, X, Bookmark, FileText, Send, User, Bot, ChevronRight,
   LayoutDashboard, ShoppingBag, Car, PenTool, Coffee, Calculator,
-  RefreshCw, Globe, MicOff, TrendingDown, TrendingUp, Trash2,
+  MicOff, TrendingDown, TrendingUp, Trash2,
   HandCoins, CheckSquare, Square, MessageCircle, Megaphone } from 'lucide-react'
 
 const N8N_WEBHOOK_URL = "/api/chat"
@@ -196,8 +196,6 @@ export default function Home() {
   const [debtOpen,  setDebtOpen]   = useState(false)
   const [shopOpen,  setShopOpen]   = useState(false)
   const [smmOpen,   setSmmOpen]    = useState(false)
-  const [browserUrl,setBrowserUrl] = useState<string | null>(null)
-  const [browserLoading, setBrowserLoading] = useState(false)
 
   // Data
   const [messages,  setMessages]  = useState<{ role: string; text: string }[]>([{ role: 'ai', text: "Salom! Men **JONKA** 🤖\n\nNima qila olaman:\n💰 **Xarajat** — \"Kafeda 45 ming xarajat\"\n💼 **Qarz** — \"Rashidga 50 ming berdim\"\n🛒 **Xaridlar** — \"Xaridlar ro'yxatiga non qo'sh\"\n📱 **SMM** — \"Instagram uchun post yoz\"\n📊 **Hisobot** — \"Xarajatlarimni ko'rsat\"\n🔍 **Qidiruv** — \"Dollar kursi qancha\"\n\n🇺🇿 O'zbek | 🇷🇺 Русский — ikkalasini tushunaman!" }])
@@ -222,7 +220,7 @@ export default function Home() {
   const [debtForm, setDebtForm] = useState<{ person: string; amount: string; dir: 'gave' | 'borrowed'; note: string }>({ person: '', amount: '', dir: 'gave', note: '' })
   const [shopInput, setShopInput] = useState('')
 
-  const iframeRef       = useRef<HTMLIFrameElement>(null)
+  const webAppRef       = useRef<{ openLink?: (url: string) => void } | null>(null)
   const recognitionRef  = useRef<ISpeechRecognition | null>(null)
   const chatEndRef      = useRef<HTMLDivElement>(null)
   const abortRef        = useRef<AbortController | null>(null)
@@ -244,10 +242,22 @@ export default function Home() {
       const W = m.default; W.ready(); W.expand()
       W.setHeaderColor('#111114'); W.setBackgroundColor('#111114')
       if (W.initDataUnsafe?.user) setUserData(W.initDataUnsafe.user)
+      webAppRef.current = W
     })
   }, [])
 
-  const openApp = (url: string) => setBrowserUrl(url)
+  // Telegram openLink — iframe o'rniga, barcha saytlar ishlaydi
+  const openApp = (url: string) => {
+    try {
+      if (webAppRef.current?.openLink) {
+        webAppRef.current.openLink(url)
+      } else {
+        window.open(url, '_blank')
+      }
+    } catch {
+      window.open(url, '_blank')
+    }
+  }
 
   const fmt = (text: string) => text.split(/\\n|\n/).map((line, i, a) => (
     <span key={i}>
@@ -501,25 +511,6 @@ export default function Home() {
     <main className="relative flex flex-col h-screen bg-[#0a0a0c] text-white font-sans overflow-hidden">
       {isLoading && <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-blue-500 via-purple-500 to-blue-500 bg-[length:200%] animate-[shimmer_1.5s_infinite] z-50" />}
 
-      {/* ══ IN-APP BROWSER ══ */}
-      {browserUrl && (
-        <div className="fixed inset-0 z-[200] flex flex-col">
-          <div className="flex items-center gap-2 px-3 py-2 bg-[#111114] border-b border-gray-800 shrink-0">
-            <button onClick={() => setBrowserUrl(null)} className="p-2 rounded-full bg-[#1a1a1f]"><X size={15} className="text-white" /></button>
-            <div className="flex-1 flex items-center gap-2 bg-[#1a1a1f] rounded-full px-3 py-1.5 overflow-hidden">
-              <Globe size={10} className="text-gray-400 shrink-0" />
-              <span className="text-[11px] text-gray-300 truncate">{browserUrl}</span>
-            </div>
-            <button onClick={() => { setBrowserLoading(true); if (iframeRef.current) iframeRef.current.src = browserUrl }} className="p-2 rounded-full bg-[#1a1a1f]"><RefreshCw size={12} className="text-gray-400" /></button>
-          </div>
-          {browserLoading && <div className="h-0.5 bg-blue-500 animate-pulse" />}
-          <iframe ref={iframeRef} src={browserUrl} className="flex-1 w-full border-0 bg-white"
-            onLoad={() => setBrowserLoading(false)} onLoadStart={() => setBrowserLoading(true)}
-            allow="camera; microphone; geolocation; payment"
-            sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-top-navigation-by-user-activation"
-          />
-        </div>
-      )}
 
       {/* ══ SIDEBAR TOGGLE ══ */}
       {!sidebar && (
