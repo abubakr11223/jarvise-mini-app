@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { Mic, Search, Grid, Menu, X, Bookmark, FileText, Send, BookOpen, User, Bot, Package, CreditCard } from 'lucide-react'
 
-// N8N PRODUCTION URL:
+// 👇 SSILKANI O'ZINGIZNIKIGA ALMASHTIRISH ESNAN CHIQMASIN:
 const N8N_WEBHOOK_URL = "https://abusaidbakrdov.app.n8n.cloud/webhook/8bafdcfb-2d60-4698-ad3e-920c16074495";
 
 export default function Home() {
@@ -46,28 +46,37 @@ export default function Home() {
     else window.open(url, '_blank');
   }
 
-  // 🚀 AI GA YUBORISH
+  // 🚀 AI GA YUBORISH (HIYLA USULI - FORMDATA)
   const sendToAI = async (text: string | null, audioBlob: Blob | null = null) => {
+    if (!N8N_WEBHOOK_URL.includes("http")) {
+      setMessages(prev => [...prev, { role: 'ai', text: '❌ N8N ssilkasi qo\'yilmagan!' }]);
+      return;
+    }
+
     setIsLoading(true);
     if (text) setMessages(prev => [...prev, { role: 'user', text: text }]);
     if (audioBlob) setMessages(prev => [...prev, { role: 'user', text: '🎤 Ovozli xabar...' }]);
 
     try {
       const url = N8N_WEBHOOK_URL.trim();
-      let response;
+
+      // 🔥 ASOSIY HIYLA SHU YERDA: CORS xatosini bermasligi uchun faqat FormData ishlatamiz!
+      const formData = new FormData();
+      formData.append('user_id', userData?.id?.toString() || '0');
 
       if (audioBlob) {
-        const formData = new FormData();
         formData.append('audio', audioBlob, 'voice.webm');
-        formData.append('user_id', userData?.id?.toString() || '0');
-        response = await fetch(url, { method: 'POST', body: formData });
+        formData.append('message_type', 'voice');
       } else {
-        response = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-          body: JSON.stringify({ message: text, user_id: userData?.id || 0 }),
-        });
+        formData.append('message', text || "");
+        formData.append('message_type', 'text');
       }
+
+      // Hech qanday Header'larsiz yuboramiz, brauzerning o'zi hal qiladi:
+      const response = await fetch(url, {
+        method: 'POST',
+        body: formData
+      });
 
       if (!response.ok) throw new Error(`${response.status}`);
 
@@ -75,29 +84,26 @@ export default function Home() {
       if (data && data.reply) {
         setMessages(prev => [...prev, { role: 'ai', text: data.reply }]);
       } else {
-        setMessages(prev => [...prev, { role: 'ai', text: '✅ Bordi, lekin AI matn qaytarmadi.' }]);
+        setMessages(prev => [...prev, { role: 'ai', text: '✅ Qabul qilindi! (Lekin n8n javob qaytarmadi)' }]);
       }
     } catch (error: any) {
-      let xatoXabari = "Aloqa uzildi. n8n'da SAVE tugmasi bosilganiga ishonch hosil qiling!";
-      if (error.message === "404") xatoXabari = "404 xato: Ssilka xato.";
-      if (error.message === "500") xatoXabari = "500 xato: n8n ichida AI xato qildi.";
-      setMessages(prev => [...prev, { role: 'ai', text: `❌ ${xatoXabari}` }]);
+      // Endi o'zimizning gap emas, haqiqiy kompyuter xatosi ekranga chiqadi
+      setMessages(prev => [...prev, { role: 'ai', text: `❌ DIQQAT XATO: ${error.name} - ${error.message}` }]);
     } finally {
+
       setIsLoading(false);
       setInputText("");
     }
   }
 
-  // 🎤 MUKAMMAL OVOZ YOZISH MANTIQI
   const toggleRecording = async () => {
     if (isRecording) {
       mediaRecorderRef.current?.stop();
       setIsRecording(false);
     } else {
       try {
-        // Brauzer mikrofonga ruxsat berishini so'raymiz
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-          alert("Telefoningiz brauzeri mikrofonga ruxsat bermayapti!");
+          alert("Brauzeringiz mikrofonga ruxsat bermayapti!");
           return;
         }
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -106,13 +112,13 @@ export default function Home() {
         recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
         recorder.onstop = () => {
           const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-          sendToAI(null, audioBlob); // Yozib bo'lingach avtomat jo'natadi
+          sendToAI(null, audioBlob);
         };
         recorder.start();
         mediaRecorderRef.current = recorder;
         setIsRecording(true);
       } catch (err) {
-        alert("Mikrofonga ulanib bo'lmadi! Telegram sozlamalaridan ruxsat berilganini tekshiring.");
+        alert("Mikrofon ruxsati yo'q! Telegram sozlamalaridan ruxsat bering.");
       }
     }
   }
@@ -163,7 +169,7 @@ export default function Home() {
         <div ref={chatEndRef} />
       </div>
 
-      {/* INPUT VA MIKROFON QISMI */}
+      {/* INPUT QISMI ZOOM BO'LMASLIGI UCHUN STYLE ANIQ BERILDI */}
       <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-[#0a0a0c] via-[#0a0a0c] to-transparent z-10">
         <div className="flex items-end gap-2">
           <div className="flex-1 bg-[#1a1a1f] rounded-3xl flex items-center px-4 py-1.5 border border-gray-700/80 shadow-lg relative min-h-[52px]">
@@ -178,7 +184,6 @@ export default function Home() {
             />
           </div>
 
-          {/* MATN BO'LSA SEND, YO'Q BO'LSA MIKROFON */}
           {inputText.trim().length > 0 ? (
             <button onClick={() => sendToAI(inputText)} className="w-[52px] h-[52px] shrink-0 rounded-full flex items-center justify-center bg-blue-600 shadow-lg shadow-blue-600/30 active:scale-90 transition-transform">
               <Send size={20} className="text-white ml-[-2px]" />
@@ -191,7 +196,7 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Kitob oynasi */}
+      {/* MODAL OYNALAR YASHIRINDI (QOLGAN KOD O'ZGARISHSZ) */}
       {isKitobOpen && (
         <div className="fixed inset-0 z-50 flex flex-col bg-[#0a0a0c] animate-slide-up">
           <header className="flex justify-between items-center p-4 border-b border-gray-800 bg-[#111114]">
