@@ -1,8 +1,56 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-const BOT_TOKEN  = process.env.TELEGRAM_BOT_TOKEN
-const N8N_URL    = process.env.N8N_WEBHOOK_URL ||
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
+const N8N_URL   = process.env.N8N_WEBHOOK_URL ||
   'https://abusaidbakrdov.app.n8n.cloud/webhook/8bafdcfb-2d60-4698-ad3e-920c16074495'
+const BASE_URL  = process.env.VERCEL_URL
+  ? `https://${process.env.VERCEL_URL}`
+  : 'https://jarvise-mini-app-jf5u.vercel.app'
+
+const today = () => new Date().toLocaleDateString('ru-RU')
+
+// ── EXPENSE kodlarni ajratib olish (n8n qaytargan formatlar) ──────────────
+function parseExpenseCodes(text: string): { name: string; amount: number; type: string }[] {
+  const results: { name: string; amount: number; type: string }[] = []
+  // Format 1: [EXPENSE:Такси|50000|XARAJAT]
+  const re1 = /\[EXPENSE:(.*?)\|(.*?)\|(.*?)\]/gi
+  // Format 2: EXPENSE:Такси|50000|XARAJAT  (without brackets)
+  const re2 = /\bEXPENSE:([\wЀ-ӿÀ-ſ]+)\|(\d+)\|(\w+)/gi
+
+  for (const m of [...text.matchAll(re1), ...text.matchAll(re2)]) {
+    const amount = parseInt(m[2])
+    if (amount > 0) results.push({ name: m[1].trim(), amount, type: m[3].trim().toUpperCase() })
+  }
+  return results
+}
+
+// ── Javobni tozalash — EXPENSE kodlar + "рублей/руб" olib tashlash ────────
+function cleanReply(text: string): string {
+  return text
+    .replace(/\[EXPENSE:.*?\]/gi, '')
+    .replace(/\bEXPENSE:[\wЀ-ӿÀ-ſ]+\|\d+\|\w+/gi, '')
+    .replace(/\s*\d+\s*(?:рублей|рублей|рубля|руб\.?|тысяч рублей|тыс\.? руб\.?)/gi, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+// ── Xarajatlarni serverga saqlash ─────────────────────────────────────────
+async function saveExpenses(exps: { name: string; amount: number; type: string }[]) {
+  const expenses = exps.map(e => ({
+    id: Date.now() + Math.random(),
+    name: e.name,
+    amount: e.amount,
+    type: e.type,
+    date: today(),
+  }))
+  try {
+    await fetch(`${BASE_URL}/api/expenses`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expenses }),
+    })
+  } catch {}
+}
 
 async function sendMessage(chat_id: number, text: string) {
   if (!BOT_TOKEN) return
@@ -45,7 +93,7 @@ async function transcribeVoice(file_id: string): Promise<string> {
     gf.append('model', 'whisper-large-v3')
     gf.append('language', 'ru')
     gf.append('response_format', 'json')
-    gf.append('prompt', 'расход, доход, такси, завтрак, зарплата, рублей, тысяч')
+    gf.append('prompt', 'расход, доход, такси, завтрак, зарплата, сум, тысяч')
     const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
       method: 'POST', headers: { Authorization: `Bearer ${GROQ}` }, body: gf,
     })
@@ -89,17 +137,23 @@ export async function POST(request: NextRequest) {
       await sendMessage(chat_id, '🎙 Ovoz qabul qilindi...')
       text = await transcribeVoice(file_id)
       if (!text) {
-        await sendMessage(chat_id, '❌ Ovozni tushunib bo\'lmadi. Matn yozing.')
+        await sendMessage(chat_id, '❌ Ovozni tushunib bo\'lmadi.')
         return NextResponse.json({ ok: true })
       }
-      // Transcribed text ni foydalanuvchiga ko'rsat
-      await sendMessage(chat_id, `📝 _Siz aytdingiz: "${text}"_`)
+      await sendMessage(chat_id, `📝 _"${text}"_`)
     } else {
       return NextResponse.json({ ok: true })
     }
 
-    const reply = await askAI(text, user_id, username)
-    await sendMessage(chat_id, reply)
+    const rawReply = await askAI(text, user_id, username)
+
+    // EXPENSE kodlarni ajratib serverga saqlash
+    const expenses = parseExpenseCodes(rawReply)
+    if (expenses.length > 0) await saveExpenses(expenses)
+
+    // Foydalanuvchiga toza javob yuborish (kodlar va "rubl" yo'q)
+    const clean = cleanReply(rawReply)
+    if (clean) await sendMessage(chat_id, clean)
 
   } catch (e) { console.error('TG webhook:', e) }
 

@@ -291,6 +291,18 @@ export default function Home() {
   useEffect(() => { save('j_history', searchHistory) }, [searchHistory])
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
+  // Bot chatdan kelgan xarajatlarni serverdan sync qilish
+  useEffect(() => {
+    fetch('/api/expenses').then(r => r.json()).then(({ expenses: srv }) => {
+      if (!Array.isArray(srv) || srv.length === 0) return
+      setExpenses(prev => {
+        const ids = new Set(prev.map((e: Expense) => e.id))
+        const toAdd = srv.filter((e: Expense) => !ids.has(e.id))
+        return toAdd.length > 0 ? [...toAdd, ...prev] : prev
+      })
+    }).catch(() => {})
+  }, [])
+
   useEffect(() => {
     if (typeof window === 'undefined') return
     import('@twa-dev/sdk').then(m => {
