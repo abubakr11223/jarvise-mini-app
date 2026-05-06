@@ -1,9 +1,8 @@
 'use client'
 import { useEffect, useState, useRef } from 'react'
-import { Mic, Search, Grid, Menu, X, Bookmark, FileText, Send, BookOpen, User, Bot, Package, CreditCard, ChevronRight, LayoutDashboard, LogOut, ShoppingBag, Car, PenTool, Coffee, MonitorPlay, Calculator } from 'lucide-react'
+import { Mic, Search, Grid, Menu, X, Bookmark, FileText, Send, User, Bot, ChevronRight, LayoutDashboard, ShoppingBag, Car, PenTool, Coffee, Calculator, ArrowLeft, RefreshCw, Globe } from 'lucide-react'
 
-// Proxy orqali CORS muammosini hal qilamiz
-const N8N_WEBHOOK_URL = "/api/chat";
+const N8N_WEBHOOK_URL = "/api/chat"
 
 export default function Home() {
   const [userData, setUserData] = useState<any>(null)
@@ -16,13 +15,17 @@ export default function Home() {
 
   const [inputText, setInputText] = useState("")
   const [messages, setMessages] = useState<{ role: string, text: string }[]>([
-    { role: 'ai', text: 'Salom! Men **JONKA** - sizning aqlli yordamchingizman 🤖. Nima xizmat?' }
+    { role: 'ai', text: 'Salom! Men **JONKA** — sizning aqlli yordamchingizman 🤖\n\nMen qila oladiganlarim:\n📊 **Xarajat/daromat yozish** — "Bugun 50,000 so\'m xarajat qildim"\n📅 **Google Calendar** — "Ertaga 14:00 da uchrashuv qo\'sh"\n📝 **Notion** — "Yangi sahifa och: Loyiha rejasi"\n🔍 **Qidiruv** — "OpenAI haqida qidir"\n\nRus tilida ham gaplashavering! 🇷🇺🇺🇿' }
   ])
 
-  // 🌟 DYNAMIC XARAJATLAR JADVALI 🌟
   const [expenses, setExpenses] = useState<{ id: number, name: string, amount: number, type: string }[]>([
     { id: 1, name: 'Ovqatlanish', amount: 50000, type: 'XARAJAT' }
   ])
+
+  // In-app browser
+  const [browserUrl, setBrowserUrl] = useState<string | null>(null)
+  const [browserLoading, setBrowserLoading] = useState(false)
+  const iframeRef = useRef<HTMLIFrameElement>(null)
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<BlobPart[]>([])
@@ -36,134 +39,136 @@ export default function Home() {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       import('@twa-dev/sdk').then((module) => {
-        const WebApp = module.default;
-        WebApp.ready();
-        WebApp.expand();
-        WebApp.setHeaderColor('#111114');
-        WebApp.setBackgroundColor('#111114');
-        if (WebApp.initDataUnsafe && WebApp.initDataUnsafe.user) setUserData(WebApp.initDataUnsafe.user);
-        setWebApp(WebApp);
-      });
+        const WebApp = module.default
+        WebApp.ready()
+        WebApp.expand()
+        WebApp.setHeaderColor('#111114')
+        WebApp.setBackgroundColor('#111114')
+        if (WebApp.initDataUnsafe?.user) setUserData(WebApp.initDataUnsafe.user)
+        setWebApp(WebApp)
+      })
     }
   }, [])
 
-  // 🚀 QAT'IY TELEGRAM ICHIDA OCHISH:
+  // Mini app ichida ochish — iframe overlay
   const openApp = (url: string) => {
-    if (webApp && webApp.openLink) {
-      webApp.openLink(url);
-    } else {
-      window.open(url, '_blank');
-    }
+    setBrowserUrl(url)
   }
 
   const formatMessage = (text: string) => {
-    const lines = text.split(/\\n|\n/);
+    const lines = text.split(/\\n|\n/)
     return lines.map((line, i) => {
-      const parts = line.split(/(\*\*.*?\*\*)/g);
+      const parts = line.split(/(\*\*.*?\*\*)/g)
       return (
         <span key={i}>
           {parts.map((part, j) => {
             if (part.startsWith('**') && part.endsWith('**')) {
               return <strong key={j} className="text-white font-bold">{part.slice(2, -2)}</strong>
             }
-            return part;
+            return part
           })}
           {i !== lines.length - 1 && <br />}
         </span>
-      );
-    });
-  };
+      )
+    })
+  }
 
   const sendToAI = async (text: string | null, audioBlob: Blob | null = null) => {
-    setIsLoading(true);
-    if (text) setMessages(prev => [...prev, { role: 'user', text: text }]);
-    if (audioBlob) setMessages(prev => [...prev, { role: 'user', text: '🎤 Ovozli xabar...' }]);
+    if (!text?.trim() && !audioBlob) return
+    setIsLoading(true)
+    if (text) setMessages(prev => [...prev, { role: 'user', text }])
+    if (audioBlob) setMessages(prev => [...prev, { role: 'user', text: '🎤 Ovozli xabar...' }])
 
     try {
-      let response;
+      let response
       if (audioBlob) {
-        const ext = audioBlob.type.includes('ogg') ? 'ogg' : audioBlob.type.includes('mp4') ? 'mp4' : 'webm';
-        const formData = new FormData();
-        formData.append('audio', audioBlob, `voice.${ext}`);
-        formData.append('user_id', userData?.id?.toString() || '0');
-        formData.append('is_voice', 'yes');
-        response = await fetch(N8N_WEBHOOK_URL, { method: 'POST', body: formData });
+        const ext = audioBlob.type.includes('ogg') ? 'ogg' : audioBlob.type.includes('mp4') ? 'mp4' : 'webm'
+        const formData = new FormData()
+        formData.append('audio', audioBlob, `voice.${ext}`)
+        formData.append('user_id', userData?.id?.toString() || '0')
+        formData.append('username', userData?.username || userData?.first_name || 'Foydalanuvchi')
+        formData.append('is_voice', 'yes')
+        response = await fetch(N8N_WEBHOOK_URL, { method: 'POST', body: formData })
       } else {
         response = await fetch(N8N_WEBHOOK_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: text, user_id: userData?.id || 0 }),
-        });
+          body: JSON.stringify({
+            message: text,
+            user_id: userData?.id || 0,
+            username: userData?.username || userData?.first_name || 'Foydalanuvchi',
+          }),
+        })
       }
 
       if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        const errMsg = (errData as { error?: string }).error || `Server xatosi: ${response.status}`;
-        throw new Error(errMsg);
+        const errData = await response.json().catch(() => ({}))
+        const errMsg = (errData as { error?: string }).error || `Server xatosi: ${response.status}`
+        throw new Error(errMsg)
       }
 
-      const data = await response.json();
-      let replyText = data?.reply || data?.response || data?.text || data?.message || data?.output || '';
-
-      if (!replyText && Array.isArray(data) && data.length > 0) {
-        const first = data[0] as Record<string, unknown>;
-        replyText = String(first?.reply || first?.text || first?.message || '');
-      }
+      const data = await response.json()
+      let replyText: string = data?.reply || data?.response || data?.text || data?.message || data?.output || ''
 
       if (replyText) {
-        // 🌟 XARAJAT KODI QIDIRISH VA JADVALGA QO'SHISH 🌟
-        const expenseMatch = replyText.match(/\[EXPENSE:(.*?)\|(.*?)\|(.*?)\]/i);
+        // [EXPENSE:...] pattern orqali xarajat qo'shish
+        const expenseMatch = replyText.match(/\[EXPENSE:(.*?)\|(.*?)\|(.*?)\]/i)
         if (expenseMatch) {
-          const newExpense = {
+          setExpenses(prev => [{
             id: Date.now(),
             name: expenseMatch[1].trim(),
             amount: parseInt(expenseMatch[2].replace(/\D/g, '')) || 0,
             type: expenseMatch[3].trim().toUpperCase()
-          };
-          setExpenses(prev => [newExpense, ...prev]);
-          replyText = replyText.replace(/\[EXPENSE:.*?\]/i, '').trim();
+          }, ...prev])
+          replyText = replyText.replace(/\[EXPENSE:.*?\]/gi, '').trim()
         }
-        setMessages(prev => [...prev, { role: 'ai', text: replyText }]);
+
+        // Smart parser — proxy ajratib yuborgan xarajat
+        if (!expenseMatch && data?.expense) {
+          const exp = data.expense as { name: string; amount: number; type: string }
+          setExpenses(prev => [{ id: Date.now(), ...exp }, ...prev])
+        }
+
+        setMessages(prev => [...prev, { role: 'ai', text: replyText }])
       } else {
-        setMessages(prev => [...prev, { role: 'ai', text: '✅ Qabul qilindi!' }]);
+        setMessages(prev => [...prev, { role: 'ai', text: '✅ Qabul qilindi!' }])
       }
     } catch (error) {
-      const msg = error instanceof Error ? error.message : 'Noma\'lum xato';
-      setMessages(prev => [...prev, { role: 'ai', text: `❌ ${msg}` }]);
+      const msg = error instanceof Error ? error.message : "Noma'lum xato"
+      setMessages(prev => [...prev, { role: 'ai', text: `❌ ${msg}` }])
     } finally {
-      setIsLoading(false);
-      setInputText("");
+      setIsLoading(false)
+      setInputText("")
     }
   }
 
   const toggleRecording = async () => {
     if (isRecording) {
-      mediaRecorderRef.current?.stop();
-      setIsRecording(false);
+      mediaRecorderRef.current?.stop()
+      setIsRecording(false)
     } else {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        // Brauzer qo'llaydigan formatni aniqlaymiz
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
         const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
           ? 'audio/webm;codecs=opus'
           : MediaRecorder.isTypeSupported('audio/webm')
           ? 'audio/webm'
           : MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')
           ? 'audio/ogg;codecs=opus'
-          : 'audio/mp4';
-        const recorder = new MediaRecorder(stream, { mimeType });
-        audioChunksRef.current = [];
-        recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
+          : 'audio/mp4'
+        const recorder = new MediaRecorder(stream, { mimeType })
+        audioChunksRef.current = []
+        recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data) }
         recorder.onstop = () => {
-          const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
-          stream.getTracks().forEach(t => t.stop());
-          sendToAI(null, audioBlob);
-        };
-        recorder.start();
-        mediaRecorderRef.current = recorder;
-        setIsRecording(true);
-      } catch (err) {
-        setMessages(prev => [...prev, { role: 'ai', text: "❌ Mikrofon ruxsati yo'q! Sozlamalardan ruxsat bering." }]);
+          const audioBlob = new Blob(audioChunksRef.current, { type: mimeType })
+          stream.getTracks().forEach(t => t.stop())
+          sendToAI(null, audioBlob)
+        }
+        recorder.start()
+        mediaRecorderRef.current = recorder
+        setIsRecording(true)
+      } catch {
+        setMessages(prev => [...prev, { role: 'ai', text: "❌ Mikrofon ruxsati yo'q! Sozlamalardan ruxsat bering." }])
       }
     }
   }
@@ -172,6 +177,42 @@ export default function Home() {
     <main className="relative flex flex-col h-screen bg-[#0a0a0c] text-white font-sans overflow-hidden">
       {isLoading && <div className="absolute top-0 left-0 w-full h-1 bg-blue-500 animate-pulse z-50"></div>}
 
+      {/* ===== IN-APP BROWSER ===== */}
+      {browserUrl && (
+        <div className="fixed inset-0 z-[200] flex flex-col bg-white">
+          {/* Browser header */}
+          <div className="flex items-center gap-2 px-3 py-2 bg-[#111114] border-b border-gray-800 shrink-0 safe-top">
+            <button
+              onClick={() => setBrowserUrl(null)}
+              className="p-2 rounded-full bg-[#1a1a1f] active:bg-[#242429]"
+            >
+              <X size={16} className="text-white" />
+            </button>
+            <div className="flex-1 flex items-center gap-2 bg-[#1a1a1f] rounded-full px-3 py-1.5">
+              <Globe size={12} className="text-gray-400 shrink-0" />
+              <span className="text-[11px] text-gray-400 truncate">{browserUrl}</span>
+            </div>
+            <button
+              onClick={() => { setBrowserLoading(true); if (iframeRef.current) iframeRef.current.src = browserUrl }}
+              className="p-2 rounded-full bg-[#1a1a1f] active:bg-[#242429]"
+            >
+              <RefreshCw size={14} className="text-gray-400" />
+            </button>
+          </div>
+          {browserLoading && <div className="h-0.5 bg-blue-500 animate-pulse"></div>}
+          <iframe
+            ref={iframeRef}
+            src={browserUrl}
+            className="flex-1 w-full border-0"
+            onLoad={() => setBrowserLoading(false)}
+            onLoadStart={() => setBrowserLoading(true)}
+            allow="camera; microphone; geolocation; payment"
+            sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-top-navigation-by-user-activation"
+          />
+        </div>
+      )}
+
+      {/* ===== SIDEBAR TOGGLE ===== */}
       {!isSidebarOpen && (
         <button
           onClick={() => setIsSidebarOpen(true)}
@@ -182,6 +223,7 @@ export default function Home() {
         </button>
       )}
 
+      {/* ===== SIDEBAR ===== */}
       <div className={`fixed inset-y-0 left-0 w-[280px] bg-[#111114] z-50 transform transition-transform duration-300 ease-in-out flex flex-col border-r border-gray-800 shadow-[10px_0_30px_rgba(0,0,0,0.7)] ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="p-6 border-b border-gray-800 flex items-center gap-4 bg-[#1a1a1f]">
           <div className="w-12 h-12 bg-gradient-to-tr from-blue-600 to-purple-600 rounded-full flex items-center justify-center text-lg font-bold shadow-lg">
@@ -204,10 +246,13 @@ export default function Home() {
           </button>
         </div>
       </div>
-      {isSidebarOpen && <div onClick={() => setIsSidebarOpen(false)} className="fixed inset-0 bg-black/60 z-40 backdrop-blur-sm transition-opacity"></div>}
+      {isSidebarOpen && <div onClick={() => setIsSidebarOpen(false)} className="fixed inset-0 bg-black/60 z-40 backdrop-blur-sm"></div>}
 
+      {/* ===== HEADER ===== */}
       <header className="flex justify-between items-center w-full px-4 py-4 bg-[#111114] border-b border-gray-800/50 shrink-0">
-        <div className="w-8 h-8 rounded-full border border-gray-700 bg-[#242429] flex justify-center items-center"><Menu size={16} className="text-gray-400" /></div>
+        <button onClick={() => setIsSidebarOpen(true)} className="w-8 h-8 rounded-full border border-gray-700 bg-[#242429] flex justify-center items-center">
+          <Menu size={16} className="text-gray-400" />
+        </button>
         <div className="flex flex-col items-center">
           <span className="text-white font-bold text-sm">JONKA ✨</span>
           <span className="text-[10px] text-green-400">Online</span>
@@ -215,6 +260,7 @@ export default function Home() {
         <div className="flex gap-2"><Bookmark size={20} className="text-gray-400" /></div>
       </header>
 
+      {/* ===== QUICK LINKS ===== */}
       <div className="w-full overflow-x-auto scrollbar-hide shrink-0 bg-[#111114] pb-3 pt-2">
         <div className="flex gap-2 px-4 w-max">
           <button onClick={() => setIsAppsOpen(true)} className="bg-[#1a1a1f] border border-blue-500/30 rounded-full px-4 py-2 flex items-center gap-2 active:scale-95 transition-transform">
@@ -232,6 +278,7 @@ export default function Home() {
         </div>
       </div>
 
+      {/* ===== CHAT ===== */}
       <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-4 pb-[80px]">
         {messages.map((msg, idx) => (
           <div key={idx} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
@@ -239,29 +286,44 @@ export default function Home() {
               {msg.role === 'user' ? <User size={10} /> : <Bot size={10} />}
               <span className="text-[9px] uppercase font-bold tracking-wider">{msg.role === 'user' ? 'Siz' : 'JONKA'}</span>
             </div>
-            <div className={`max-w-[85%] rounded-2xl p-3.5 text-[15px] leading-relaxed shadow-sm ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-tr-sm' : 'bg-[#1a1a1f] text-gray-300 rounded-tl-sm border border-gray-800'
-              }`}>
+            <div className={`max-w-[85%] rounded-2xl p-3.5 text-[15px] leading-relaxed shadow-sm ${
+              msg.role === 'user'
+                ? 'bg-blue-600 text-white rounded-tr-sm'
+                : 'bg-[#1a1a1f] text-gray-300 rounded-tl-sm border border-gray-800'
+            }`}>
               {msg.role === 'ai' ? formatMessage(msg.text) : msg.text}
             </div>
           </div>
         ))}
+        {isLoading && (
+          <div className="flex flex-col items-start">
+            <div className="flex items-center gap-1.5 mb-1 opacity-50 px-1">
+              <Bot size={10} /><span className="text-[9px] uppercase font-bold tracking-wider">JONKA</span>
+            </div>
+            <div className="bg-[#1a1a1f] rounded-2xl rounded-tl-sm border border-gray-800 p-3.5 flex gap-1.5">
+              <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+              <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+              <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+            </div>
+          </div>
+        )}
         <div ref={chatEndRef} />
       </div>
 
+      {/* ===== INPUT ===== */}
       <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-[#0a0a0c] via-[#0a0a0c] to-transparent z-10">
         <div className="flex items-end gap-2">
-          <div className="flex-1 bg-[#1a1a1f] rounded-3xl flex items-center px-4 py-1.5 border border-gray-700/80 shadow-lg relative min-h-[52px]">
+          <div className="flex-1 bg-[#1a1a1f] rounded-3xl flex items-center px-4 py-1.5 border border-gray-700/80 shadow-lg min-h-[52px]">
             <input
               type="text"
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && sendToAI(inputText)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendToAI(inputText) } }}
               placeholder="JONKA ga yozing..."
               style={{ fontSize: '16px' }}
               className="bg-transparent border-none outline-none text-white w-full placeholder-gray-500 py-3"
             />
           </div>
-
           {inputText.trim().length > 0 ? (
             <button onClick={() => sendToAI(inputText)} className="w-[52px] h-[52px] shrink-0 rounded-full flex items-center justify-center bg-blue-600 shadow-lg shadow-blue-600/30 active:scale-90 transition-transform">
               <Send size={20} className="text-white ml-[-2px]" />
@@ -274,18 +336,39 @@ export default function Home() {
         </div>
       </div>
 
-      {/* 📚 DYNAMIC MOLIYA VA XARAJAT MODALI */}
+      {/* ===== MOLIYA MODALI ===== */}
       {isKitobOpen && (
         <div className="fixed inset-0 z-50 flex flex-col bg-[#0a0a0c] animate-slide-up">
           <header className="flex justify-between items-center p-4 border-b border-gray-800 bg-[#111114]">
             <h2 className="text-lg font-bold flex items-center gap-2"><Calculator className="text-green-500" /> Moliya va Xarajat</h2>
             <button onClick={() => setIsKitobOpen(false)} className="p-2 bg-[#1a1a1f] rounded-full text-gray-400"><X size={20} /></button>
           </header>
+
+          {/* Jami */}
+          <div className="px-4 pt-4 grid grid-cols-2 gap-3 shrink-0">
+            <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4">
+              <p className="text-xs text-red-400 mb-1">Jami Xarajat</p>
+              <p className="text-lg font-bold text-red-400">
+                -{expenses.filter(e => e.type === 'XARAJAT').reduce((s, e) => s + e.amount, 0).toLocaleString()} UZS
+              </p>
+            </div>
+            <div className="bg-green-500/10 border border-green-500/20 rounded-2xl p-4">
+              <p className="text-xs text-green-400 mb-1">Jami Daromat</p>
+              <p className="text-lg font-bold text-green-400">
+                +{expenses.filter(e => e.type !== 'XARAJAT').reduce((s, e) => s + e.amount, 0).toLocaleString()} UZS
+              </p>
+            </div>
+          </div>
+
           <div className="flex-1 p-4 overflow-y-auto">
             <div className="bg-[#111114] rounded-2xl border border-gray-800 shadow-xl overflow-hidden">
               <table className="w-full text-left text-[14px]">
                 <thead className="bg-[#1a1a1f] text-gray-400 text-xs uppercase">
-                  <tr><th className="p-4 font-medium">Toifa</th><th className="p-4 font-medium">Summa</th><th className="p-4 font-medium">Holat</th></tr>
+                  <tr>
+                    <th className="p-4 font-medium">Toifa</th>
+                    <th className="p-4 font-medium">Summa</th>
+                    <th className="p-4 font-medium">Holat</th>
+                  </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-800/50">
                   {expenses.map((exp) => (
@@ -308,7 +391,7 @@ export default function Home() {
         </div>
       )}
 
-      {/* 📱 SUPER APP BARCHA ILOVALAR KANALOGI */}
+      {/* ===== SUPER APP ILOVALAR ===== */}
       {isAppsOpen && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/80 backdrop-blur-md">
           <div className="w-full h-[75%] bg-[#111114] rounded-t-[30px] p-6 relative border-t border-gray-800 animate-slide-up shadow-[0_-10px_40px_rgba(0,0,0,0.5)] overflow-y-auto">
@@ -317,21 +400,35 @@ export default function Home() {
 
             <h3 className="text-sm font-bold text-gray-400 mb-3 uppercase tracking-wider">🛍 Marketpleys</h3>
             <div className="grid grid-cols-4 gap-4 mb-6">
-              <button onClick={() => openApp('https://uzum.uz')} className="flex flex-col items-center gap-2 active:scale-95 transition-transform"><div className="w-14 h-14 bg-purple-600/20 border border-purple-500/30 rounded-[18px] flex items-center justify-center shadow-lg"><ShoppingBag size={24} className="text-purple-500" /></div><span className="text-[11px] text-gray-300">Uzum</span></button>
-              <button onClick={() => openApp('https://lavka.yandex.ru/')} className="flex flex-col items-center gap-2 active:scale-95 transition-transform"><div className="w-14 h-14 bg-yellow-500/20 border border-yellow-500/30 rounded-[18px] flex items-center justify-center shadow-lg"><Coffee size={24} className="text-yellow-500" /></div><span className="text-[11px] text-gray-300">Lavka</span></button>
+              <button onClick={() => { setIsAppsOpen(false); openApp('https://uzum.uz') }} className="flex flex-col items-center gap-2 active:scale-95 transition-transform">
+                <div className="w-14 h-14 bg-purple-600/20 border border-purple-500/30 rounded-[18px] flex items-center justify-center shadow-lg"><ShoppingBag size={24} className="text-purple-500" /></div>
+                <span className="text-[11px] text-gray-300">Uzum</span>
+              </button>
+              <button onClick={() => { setIsAppsOpen(false); openApp('https://lavka.yandex.ru/') }} className="flex flex-col items-center gap-2 active:scale-95 transition-transform">
+                <div className="w-14 h-14 bg-yellow-500/20 border border-yellow-500/30 rounded-[18px] flex items-center justify-center shadow-lg"><Coffee size={24} className="text-yellow-500" /></div>
+                <span className="text-[11px] text-gray-300">Lavka</span>
+              </button>
             </div>
 
             <h3 className="text-sm font-bold text-gray-400 mb-3 uppercase tracking-wider">🚕 Transport</h3>
             <div className="grid grid-cols-4 gap-4 mb-6">
-              <button onClick={() => openApp('https://go.yandex/')} className="flex flex-col items-center gap-2 active:scale-95 transition-transform"><div className="w-14 h-14 bg-yellow-500/20 border border-yellow-500/30 rounded-[18px] flex items-center justify-center shadow-lg"><Car size={24} className="text-yellow-400" /></div><span className="text-[11px] text-gray-300">Yandex Go</span></button>
+              <button onClick={() => { setIsAppsOpen(false); openApp('https://go.yandex/') }} className="flex flex-col items-center gap-2 active:scale-95 transition-transform">
+                <div className="w-14 h-14 bg-yellow-500/20 border border-yellow-500/30 rounded-[18px] flex items-center justify-center shadow-lg"><Car size={24} className="text-yellow-400" /></div>
+                <span className="text-[11px] text-gray-300">Yandex Go</span>
+              </button>
             </div>
 
             <h3 className="text-sm font-bold text-gray-400 mb-3 uppercase tracking-wider">📝 Ish va Baza</h3>
             <div className="grid grid-cols-4 gap-4 mb-6">
-              <button onClick={() => openApp('https://notion.so')} className="flex flex-col items-center gap-2 active:scale-95 transition-transform"><div className="w-14 h-14 bg-gray-600/20 border border-gray-500/30 rounded-[18px] flex items-center justify-center shadow-lg"><FileText size={24} className="text-white" /></div><span className="text-[11px] text-gray-300">Notion</span></button>
-              <button onClick={() => openApp('https://figma.com')} className="flex flex-col items-center gap-2 active:scale-95 transition-transform"><div className="w-14 h-14 bg-pink-600/20 border border-pink-500/30 rounded-[18px] flex items-center justify-center shadow-lg"><PenTool size={24} className="text-pink-400" /></div><span className="text-[11px] text-gray-300">Figma</span></button>
+              <button onClick={() => { setIsAppsOpen(false); openApp('https://notion.so') }} className="flex flex-col items-center gap-2 active:scale-95 transition-transform">
+                <div className="w-14 h-14 bg-gray-600/20 border border-gray-500/30 rounded-[18px] flex items-center justify-center shadow-lg"><FileText size={24} className="text-white" /></div>
+                <span className="text-[11px] text-gray-300">Notion</span>
+              </button>
+              <button onClick={() => { setIsAppsOpen(false); openApp('https://figma.com') }} className="flex flex-col items-center gap-2 active:scale-95 transition-transform">
+                <div className="w-14 h-14 bg-pink-600/20 border border-pink-500/30 rounded-[18px] flex items-center justify-center shadow-lg"><PenTool size={24} className="text-pink-400" /></div>
+                <span className="text-[11px] text-gray-300">Figma</span>
+              </button>
             </div>
-
           </div>
         </div>
       )}
