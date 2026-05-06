@@ -2,6 +2,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { Mic, Search, Grid, Menu, X, Bookmark, FileText, Send, BookOpen, User, Bot, Package, CreditCard, ChevronRight, LayoutDashboard, LogOut, ShoppingBag, Car, PenTool, Coffee, MonitorPlay, Calculator } from 'lucide-react'
 
+// 👇 O'ZINGIZNING PRODUCTION SSILKANGIZ:
 const N8N_WEBHOOK_URL = "https://abusaidbakrdov.app.n8n.cloud/webhook/8bafdcfb-2d60-4698-ad3e-920c16074495";
 
 export default function Home() {
@@ -41,9 +42,14 @@ export default function Home() {
     }
   }, [])
 
-  // 🚀 SAFARI'GA CHIQMASLIGI UCHUN TO'G'RILANDI:
+  // 🚀 iPhone SAFARI'GA CHIQMASLIGI UCHUN "HACK" USULI:
   const openApp = (url: string) => {
-    window.open(url, '_blank');
+    const link = document.createElement('a');
+    link.href = url;
+    link.target = '_blank'; // Telegram ichki oynasini chaqiradi
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   }
 
   const formatMessage = (text: string) => {
@@ -75,8 +81,7 @@ export default function Home() {
         const formData = new FormData();
         formData.append('audio', audioBlob, 'voice.webm');
         formData.append('user_id', userData?.id?.toString() || '0');
-        // 👇 N8N OVOZ EKANINI ANIQ TANISHI UCHUN MAXSUS KOD:
-        formData.append('is_voice', 'yes');
+        formData.append('is_voice', 'yes'); // N8n bilishi uchun
 
         response = await fetch(N8N_WEBHOOK_URL.trim(), { method: 'POST', body: formData });
       } else {
