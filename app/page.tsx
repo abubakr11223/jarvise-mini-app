@@ -26,16 +26,18 @@ function detectApp(text: string): string | null {
 
 // ─── Category icons ───────────────────────────────────────────────────────────
 const CATS = [
-  { kw: ['kafe','qahva','coffee','restoran','tushlik','ovqat','еда','кафе'], icon:'🍽️', c:'orange' },
-  { kw: ['taxi','taksi','yandex go','transport','avtobus','metro','такси'],  icon:'🚕', c:'yellow' },
-  { kw: ['bozor','supermarket','oziq','mahsulot','groceries','продукты'],    icon:'🛒', c:'green'  },
-  { kw: ['kiyim','oyoq','brend','shopping','одежда','обувь'],                icon:'👕', c:'purple' },
-  { kw: ['dori','dorixona','apteka','shifokor','лекарство'],                 icon:'💊', c:'red'    },
-  { kw: ['internet','telefon','aloqa','интернет'],                           icon:'📱', c:'blue'   },
-  { kw: ['uy','kvartira','kommunal','ijara','аренда'],                       icon:'🏠', c:'teal'   },
-  { kw: ['sport','gym','fitness','спорт'],                                   icon:'💪', c:'green'  },
-  { kw: ["ta'lim",'kurs','kitob','обучение'],                               icon:'📚', c:'blue'   },
-  { kw: ['maosh','ish haqi','зарплата','доход'],                             icon:'💰', c:'green'  },
+  { kw: ['kafe','qahva','coffee','restoran','tushlik','ovqat','еда','кафе','завтрак','обед','ужин','перекус','ресторан','столовая','фастфуд','пицца','шаурма'], icon:'🍽️', c:'orange' },
+  { kw: ['taxi','taksi','yandex go','transport','avtobus','metro','такси','транспорт','метро','автобус','маршрутка','бензин','парковка'], icon:'🚕', c:'yellow' },
+  { kw: ['bozor','supermarket','oziq','mahsulot','groceries','продукты','магазин','супермаркет','рынок','продукт'], icon:'🛒', c:'green'  },
+  { kw: ['kiyim','oyoq','brend','shopping','одежда','обувь','одежд','магазин одежды'], icon:'👕', c:'purple' },
+  { kw: ['dori','dorixona','apteka','shifokor','лекарство','аптека','врач','больница','клиника'], icon:'💊', c:'red'    },
+  { kw: ['internet','telefon','aloqa','интернет','телефон','связь','мобильный'], icon:'📱', c:'blue'   },
+  { kw: ['uy','kvartira','kommunal','ijara','аренда','квартира','коммунал','жильё','дом'], icon:'🏠', c:'teal'   },
+  { kw: ['sport','gym','fitness','спорт','фитнес','тренажёр','бассейн'], icon:'💪', c:'green'  },
+  { kw: ["ta'lim",'kurs','kitob','обучение','курс','учёба','книга'], icon:'📚', c:'blue'   },
+  { kw: ['maosh','ish haqi','зарплата','доход','получил','заработал','выплата'], icon:'💰', c:'green'  },
+  { kw: ['кофе','чай','напиток'], icon:'☕', c:'orange' },
+  { kw: ['развлечения','кино','театр','концерт','клуб'], icon:'🎬', c:'purple' },
 ]
 const COLOR: Record<string, string> = {
   orange: 'bg-orange-500/15 border-orange-500/30 text-orange-300',
@@ -101,6 +103,43 @@ function parseUserExpense(text: string): { name: string; amount: number; type: '
     if (kw) { name = kw.charAt(0).toUpperCase() + kw.slice(1); break }
   }
   return { name, amount, type }
+}
+
+// ─── Multiple expenses in one message ────────────────────────────────────
+function parseAllExpenses(text: string): { name: string; amount: number; type: 'XARAJAT' | 'DAROMAT' }[] {
+  // Split by common multi-expense connectors (RU + UZ)
+  const parts = text.split(/,\s*(?:плюс|и\s+ещё|и\s+еще|ещё|еще|также|плюс\s+ещё|\+)|;\s*|\bплюс\b(?!\s*$)|\bи\b(?=\s+\d)/gi)
+    .map(p => p.trim()).filter(p => p.length > 3)
+
+  if (parts.length > 1) {
+    const results: { name: string; amount: number; type: 'XARAJAT' | 'DAROMAT' }[] = []
+    for (const part of parts) {
+      const exp = parseUserExpense(part)
+      if (exp) results.push(exp)
+    }
+    if (results.length > 0) return results
+  }
+
+  // Fallback: scan full text for "на X" / "за X" patterns with amounts
+  const naPattern = /(\d[\d\s,]*)\s*(?:сум|сумм|руб|рублей|тысяч|k|к)\s+(?:на|за)\s+([а-яёА-ЯЁ]+)/gi
+  const matches = [...text.matchAll(naPattern)]
+  if (matches.length > 1) {
+    return matches.map(m => {
+      const amount = parseAmount(m[1])
+      const catWord = m[2].toLowerCase()
+      let name = catWord.charAt(0).toUpperCase() + catWord.slice(1)
+      for (const cat of CATS) {
+        if (cat.kw.some(k => catWord.includes(k) || k.includes(catWord))) {
+          name = cat.kw[0].charAt(0).toUpperCase() + cat.kw[0].slice(1)
+          break
+        }
+      }
+      return amount >= 500 ? { name, amount, type: 'XARAJAT' as const } : null
+    }).filter(Boolean) as { name: string; amount: number; type: 'XARAJAT' | 'DAROMAT' }[]
+  }
+
+  const single = parseUserExpense(text)
+  return single ? [single] : []
 }
 
 // ─── Local debt detector — NO AI needed ──────────────────────────────────────
@@ -336,12 +375,13 @@ export default function Home() {
 
     // ── INSTANT LOCAL PARSERS — expense/debt saved immediately ──
     if (!skipLocalParse) {
-      const exp = parseUserExpense(text)
-      if (exp) {
-        addExpense(exp.name, exp.amount, exp.type)
+      const exps = parseAllExpenses(text)
+      if (exps.length > 0) {
+        exps.forEach(e => addExpense(e.name, e.amount, e.type))
+        const lines = exps.map(e => `${e.type === 'XARAJAT' ? '📉' : '📈'} **${e.name}** — ${e.amount.toLocaleString()} UZS`).join('\n')
         setMessages(p => [...p,
           { role: 'user', text },
-          { role: 'ai', text: `✅ **${exp.type === 'XARAJAT' ? 'Xarajat' : 'Daromat'} qo'shildi!**\n\n${exp.type === 'XARAJAT' ? '📉' : '📈'} **${exp.name}**\n💰 ${exp.amount.toLocaleString()} UZS\n📅 ${today()}` }
+          { role: 'ai', text: `✅ **${exps.length > 1 ? `${exps.length} ta xarajat` : (exps[0].type === 'XARAJAT' ? 'Xarajat' : 'Daromat')} qo'shildi!**\n\n${lines}\n📅 ${today()}` }
         ])
         setTimeout(() => setExpOpen(true), 700)
         return
