@@ -19,6 +19,11 @@ export default function Home() {
     { role: 'ai', text: 'Salom! Men **JONKA** - sizning aqlli yordamchingizman 🤖. Nima xizmat?' }
   ])
 
+  // 🌟 DYNAMIC XARAJATLAR JADVALI 🌟
+  const [expenses, setExpenses] = useState<{ id: number, name: string, amount: number, type: string }[]>([
+    { id: 1, name: 'Ovqatlanish', amount: 50000, type: 'XARAJAT' }
+  ])
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<BlobPart[]>([])
   const chatEndRef = useRef<HTMLDivElement>(null)
@@ -42,14 +47,13 @@ export default function Home() {
     }
   }, [])
 
-  // 🚀 iPhone SAFARI'GA CHIQMASLIGI UCHUN "HACK" USULI:
+  // 🚀 QAT'IY TELEGRAM ICHIDA OCHISH:
   const openApp = (url: string) => {
-    const link = document.createElement('a');
-    link.href = url;
-    link.target = '_blank'; // Telegram ichki oynasini chaqiradi
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    if (webApp && webApp.openLink) {
+      webApp.openLink(url);
+    } else {
+      window.open(url, '_blank');
+    }
   }
 
   const formatMessage = (text: string) => {
@@ -81,8 +85,7 @@ export default function Home() {
         const formData = new FormData();
         formData.append('audio', audioBlob, 'voice.webm');
         formData.append('user_id', userData?.id?.toString() || '0');
-        formData.append('is_voice', 'yes'); // N8n bilishi uchun
-
+        formData.append('is_voice', 'yes');
         response = await fetch(N8N_WEBHOOK_URL.trim(), { method: 'POST', body: formData });
       } else {
         response = await fetch(N8N_WEBHOOK_URL.trim(), {
@@ -96,7 +99,24 @@ export default function Home() {
 
       const data = await response.json();
       if (data && data.reply) {
-        setMessages(prev => [...prev, { role: 'ai', text: data.reply }]);
+        let replyText = data.reply;
+
+        // 🌟 MAXFIY KODNI QIDIRISH VA JADVALGA QO'SHISH 🌟
+        const expenseMatch = replyText.match(/\[EXPENSE:(.*?)\|(.*?)\|(.*?)\]/i);
+        if (expenseMatch) {
+          const newExpense = {
+            id: Date.now(),
+            name: expenseMatch[1].trim(),
+            amount: parseInt(expenseMatch[2].replace(/\D/g, '')) || 0,
+            type: expenseMatch[3].trim().toUpperCase()
+          };
+          setExpenses(prev => [newExpense, ...prev]);
+
+          // Maxfiy kodni foydalanuvchiga ko'rsatmaslik uchun tozalaymiz
+          replyText = replyText.replace(/\[EXPENSE:.*?\]/i, '').trim();
+        }
+
+        setMessages(prev => [...prev, { role: 'ai', text: replyText }]);
       } else {
         setMessages(prev => [...prev, { role: 'ai', text: '✅ Qabul qildim!' }]);
       }
@@ -237,6 +257,7 @@ export default function Home() {
         </div>
       </div>
 
+      {/* 📚 DYNAMIC MOLIYA VA XARAJAT MODALI */}
       {isKitobOpen && (
         <div className="fixed inset-0 z-50 flex flex-col bg-[#0a0a0c] animate-slide-up">
           <header className="flex justify-between items-center p-4 border-b border-gray-800 bg-[#111114]">
@@ -250,7 +271,19 @@ export default function Home() {
                   <tr><th className="p-4 font-medium">Toifa</th><th className="p-4 font-medium">Summa</th><th className="p-4 font-medium">Holat</th></tr>
                 </thead>
                 <tbody className="divide-y divide-gray-800/50">
-                  <tr><td className="p-4">Ovqatlanish</td><td className="p-4 text-red-400 font-medium">50,000 UZS</td><td className="p-4"><span className="bg-red-500/10 border border-red-500/20 text-red-400 px-2 py-1 rounded text-[10px] uppercase font-bold">Xarajat</span></td></tr>
+                  {expenses.map((exp) => (
+                    <tr key={exp.id}>
+                      <td className="p-4">{exp.name}</td>
+                      <td className={`p-4 font-medium ${exp.type === 'XARAJAT' ? 'text-red-400' : 'text-green-400'}`}>
+                        {exp.type === 'XARAJAT' ? '-' : '+'}{exp.amount.toLocaleString()} UZS
+                      </td>
+                      <td className="p-4">
+                        <span className={`px-2 py-1 rounded text-[10px] uppercase font-bold ${exp.type === 'XARAJAT' ? 'bg-red-500/10 border border-red-500/20 text-red-400' : 'bg-green-500/10 border border-green-500/20 text-green-400'}`}>
+                          {exp.type}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -258,6 +291,7 @@ export default function Home() {
         </div>
       )}
 
+      {/* 📱 SUPER APP BARCHA ILOVALAR KANALOGI */}
       {isAppsOpen && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/80 backdrop-blur-md">
           <div className="w-full h-[75%] bg-[#111114] rounded-t-[30px] p-6 relative border-t border-gray-800 animate-slide-up shadow-[0_-10px_40px_rgba(0,0,0,0.5)] overflow-y-auto">
