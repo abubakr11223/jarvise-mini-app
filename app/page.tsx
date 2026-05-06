@@ -106,36 +106,47 @@ function parseUserExpense(text: string): { name: string; amount: number; type: '
 }
 
 // ─── Multiple expenses in one message ────────────────────────────────────
+function resolveCatName(word: string): string {
+  const l = word.toLowerCase()
+  for (const cat of CATS) {
+    if (cat.kw.some(k => l.includes(k.slice(0, 4)) || k.includes(l.slice(0, 4)))) {
+      const kw = cat.kw[0]
+      return kw.charAt(0).toUpperCase() + kw.slice(1)
+    }
+  }
+  return word.charAt(0).toUpperCase() + word.slice(1)
+}
+
 function parseAllExpenses(text: string): { name: string; amount: number; type: 'XARAJAT' | 'DAROMAT' }[] {
-  // Split by common multi-expense connectors (RU + UZ)
-  const parts = text.split(/,\s*(?:плюс|и\s+ещё|и\s+еще|ещё|еще|также|плюс\s+ещё|\+)|;\s*|\bплюс\b(?!\s*$)|\bи\b(?=\s+\d)/gi)
-    .map(p => p.trim()).filter(p => p.length > 3)
+  // 1. Try splitting on connectors
+  const parts = text
+    .split(/,?\s*(?:плюс\s+(?:ещё|еще)|и\s+(?:ещё|еще|на)|плюс|также|\+)|[;,]\s*(?=\d)|(?<=\d{3,})\s+и\s+/gi)
+    .map(p => p.replace(/^(?:ещё|еще|и|а)\s+/i, '').trim())
+    .filter(p => p.length > 3)
 
   if (parts.length > 1) {
-    const results: { name: string; amount: number; type: 'XARAJAT' | 'DAROMAT' }[] = []
-    for (const part of parts) {
+    const seen = new Set<number>()
+    const results = parts.flatMap(part => {
       const exp = parseUserExpense(part)
-      if (exp) results.push(exp)
-    }
-    if (results.length > 0) return results
+      if (exp && !seen.has(exp.amount)) { seen.add(exp.amount); return [exp] }
+      return []
+    })
+    if (results.length >= 2) return results
   }
 
-  // Fallback: scan full text for "на X" / "за X" patterns with amounts
-  const naPattern = /(\d[\d\s,]*)\s*(?:сум|сумм|руб|рублей|тысяч|k|к)\s+(?:на|за)\s+([а-яёА-ЯЁ]+)/gi
-  const matches = [...text.matchAll(naPattern)]
-  if (matches.length > 1) {
-    return matches.map(m => {
-      const amount = parseAmount(m[1])
-      const catWord = m[2].toLowerCase()
-      let name = catWord.charAt(0).toUpperCase() + catWord.slice(1)
-      for (const cat of CATS) {
-        if (cat.kw.some(k => catWord.includes(k) || k.includes(catWord))) {
-          name = cat.kw[0].charAt(0).toUpperCase() + cat.kw[0].slice(1)
-          break
-        }
-      }
-      return amount >= 500 ? { name, amount, type: 'XARAJAT' as const } : null
-    }).filter(Boolean) as { name: string; amount: number; type: 'XARAJAT' | 'DAROMAT' }[]
+  // 2. Regex scan: AMOUNT (сум|руб)? (на|за|в) CATEGORY
+  const pattern = /(\d[\d\s,]*(?:тысяч|к|k|ming)?)\s*(?:сум|сумм|руб|рублей|тысяч|сўм|so[`']?m)?\s+(?:на|за|в)\s+([\wа-яёА-ЯЁ\-]+)/gi
+  const found = [...text.matchAll(pattern)]
+  if (found.length > 1) {
+    const seen = new Set<number>()
+    const results = found.flatMap(m => {
+      const amount = parseAmount(m[1] + ' ' + m[0].split(/\s+/).slice(-1)[0])
+      const a = parseAmount(m[1])
+      if (a < 500 || seen.has(a)) return []
+      seen.add(a)
+      return [{ name: resolveCatName(m[2]), amount: a, type: 'XARAJAT' as const }]
+    })
+    if (results.length >= 2) return results
   }
 
   const single = parseUserExpense(text)
