@@ -38,10 +38,10 @@ export async function POST(request: NextRequest) {
 
     const gf = new FormData()
     gf.append('file', audio, 'audio.webm')
-    gf.append('model', 'whisper-large-v3')
-    gf.append('language', language)
+    gf.append('model', 'whisper-large-v3-turbo')
+    // language YO'Q → auto-detect (UZ+RU ikkalasini tushunadi)
     gf.append('response_format', 'json')
-    gf.append('prompt', 'расход, доход, долг, рублей, тысяч, заплатил, купил, кафе, такси, зарплата, перевёл')
+    gf.append('prompt', "xarajat, daromat, qarz, ming so'm, berdim, oldim, taksi, kafe, restoran, ovqat, maosh, рублей, тысяч, заплатил, купил, расход, доход, долг, зарплата, перевёл, такси, кафе, обед")
 
     const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
       method: 'POST',

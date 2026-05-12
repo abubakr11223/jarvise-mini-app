@@ -1,0 +1,57 @@
+{
+  "name": "Bank Email → Jarvis Auto-Save",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": { "item": [{ "mode": "everyMinute" }] },
+        "filters": {
+          "q": "subject:(so'm OR UZS OR Kapitalbank OR Hamkorbank OR \"Uzum Bank\" OR Agrobank OR \"Xalq Bank\") newer_than:1d"
+        },
+        "options": { "dataPropertyAttachmentsPrefixName": "attachment_" }
+      },
+      "id": "gmail-trigger",
+      "name": "Gmail – Bank Emails",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "credentials": { "gmailOAuth2": { "id": "gmail-cred", "name": "Gmail account" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst text  = item.text || item.snippet || '';\nconst html  = item.html  || item.payload?.body?.data || '';\nconst from  = item.from  || item.sender || '';\nconst subj  = item.subject || '';\nreturn [{ json: { subject: subj, text, html, from } }];"
+      },
+      "id": "extract-body",
+      "name": "Extract Email Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://YOUR_APP_URL/api/email-import?chat_id=YOUR_TELEGRAM_CHAT_ID",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "subject", "value": "={{ $json.subject }}" },
+            { "name": "text",    "value": "={{ $json.text }}"    },
+            { "name": "html",    "value": "={{ $json.html }}"    },
+            { "name": "from",    "value": "={{ $json.from }}"    }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-jarvis",
+      "name": "POST → Jarvis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300]
+    }
+  ],
+  "connections": {
+    "Gmail – Bank Emails": { "main": [[{ "node": "Extract Email Body", "type": "main", "index": 0 }]] },
+    "Extract Email Body":  { "main": [[{ "node": "POST → Jarvis",      "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "_note": "1) YOUR_APP_URL ni o'zingizning Vercel URL bilan almashtiring  2) YOUR_TELEGRAM_CHAT_ID ni /id dan oling  3) Gmail credentials qo'shing  4) Active qiling"
+}
