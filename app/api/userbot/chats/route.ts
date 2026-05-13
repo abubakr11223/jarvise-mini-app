@@ -10,7 +10,7 @@ const API_ID    = parseInt(process.env.TELEGRAM_API_ID   || '0')
 const API_HASH  = process.env.TELEGRAM_API_HASH          || ''
 const REDIS_URL   = process.env.KV_REST_API_URL   || process.env.UPSTASH_REDIS_REST_URL
 const REDIS_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN
-const CACHE_KEY  = 'tg_userbot_chats_v3'
+const CACHE_KEY  = 'tg_userbot_chats_v5'
 const CACHE_TTL  = 300  // 5 daqiqa
 
 async function kvGet(key: string): Promise<string | null> {
