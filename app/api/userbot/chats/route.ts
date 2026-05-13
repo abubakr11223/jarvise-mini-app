@@ -75,11 +75,13 @@ export async function GET(req: Request) {
     const allChats: TgChat[] = []
     const seen = new Set<string>()
 
-    // client.getDialogs() — GramJS high-level metod, pagination o'zi boshqaradi
+    // iterDialogs — GramJS async generator, 48s timeout ichida imkon qadar yuklaymiz
+    const deadline = Date.now() + 46_000
+    let count = 0
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const dialogs = await (client as any).getDialogs({ limit: 500, offsetDate: 0 })
-
-    for (const dialog of dialogs) {
+    for await (const dialog of (client as any).iterDialogs({ limit: 300 })) {
+      if (Date.now() > deadline) { console.log(`[chats] deadline, got ${count}`); break }
+      count++
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const e = dialog.entity as any
@@ -124,6 +126,7 @@ export async function GET(req: Request) {
         })
       } catch { continue }
     }
+    console.log(`[chats] total parsed: ${allChats.length}`)
 
     await client.disconnect()
 
@@ -136,11 +139,24 @@ export async function GET(req: Request) {
       return 0
     })
 
-    await kvSet(CACHE_KEY, JSON.stringify(allChats), CACHE_TTL)
+    // Bo'sh bo'lsa cache ga yozmaymiz (xatoni oldini olamiz)
+    if (allChats.length > 0) {
+      await kvSet(CACHE_KEY, JSON.stringify(allChats), CACHE_TTL)
+    }
 
     return NextResponse.json({ ok: true, chats: allChats, total: allChats.length, cached: false })
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
+    console.log('[chats] ERROR:', msg)
+    // Agar cache da bir narsa bo'lsa, uni qaytaramiz
+    try {
+      const fallback = await kvGet(CACHE_KEY)
+      if (fallback) {
+        const list = JSON.parse(fallback)
+        if (Array.isArray(list) && list.length > 0)
+          return NextResponse.json({ ok: true, chats: list, total: list.length, cached: true, fallback: true })
+      }
+    } catch {}
     return NextResponse.json({ ok: false, error: msg })
   }
 }
