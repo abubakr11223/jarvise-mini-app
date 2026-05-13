@@ -342,93 +342,288 @@ export async function GET(request: NextRequest) {
     try {
       const hdr = { Authorization: `Bearer ${TOKEN}`, 'Notion-Version': '2022-06-28' }
 
-      // Helper: extract text from a block
-      const blockText = (b: Record<string, unknown>) => {
-        const t = b.type as string
-        const c = (b[t] || {}) as Record<string, unknown>
-        const text = c.rich_text
-          ? (c.rich_text as Array<{plain_text:string}>).map(r => r.plain_text).join('')
-          : t === 'child_page' ? (c as {title:string}).title
-          : t === 'child_database' ? (c as {title:string}).title
-          : ''
-        return { type: t, text, checked: (c as {checked?:boolean}).checked, id: b.id as string }
+      // ── Rich text segment extractor (bold/italic/code/color/link)
+      type Seg = {text:string; bold?:boolean; italic?:boolean; strikethrough?:boolean; underline?:boolean; code?:boolean; color?:string; href?:string}
+      const extractSegs = (rt: unknown[]): Seg[] =>
+        (rt || []).flatMap((r: unknown) => {
+          const x = r as {plain_text:string; annotations?:{bold?:boolean;italic?:boolean;strikethrough?:boolean;underline?:boolean;code?:boolean;color?:string}; href?:string}
+          if (!x.plain_text) return []
+          return [{ text: x.plain_text,
+            bold: x.annotations?.bold || undefined,
+            italic: x.annotations?.italic || undefined,
+            strikethrough: x.annotations?.strikethrough || undefined,
+            underline: x.annotations?.underline || undefined,
+            code: x.annotations?.code || undefined,
+            color: (x.annotations?.color && x.annotations.color !== 'default') ? x.annotations.color : undefined,
+            href: x.href || undefined,
+          }]
+        })
+
+      type DBCell  = { text: string; color?: string; kind: string }
+      type DBRow   = { id: string; icon?: string; title: string; url: string; cells: Record<string, DBCell> }
+      type DBCol   = { name: string; type: string }
+
+      type NBlock = {
+        type:string; text:string; segments:Seg[];
+        checked?:boolean; id:string; url?:string; has_children?:boolean;
+        icon?:string; color?:string; src?:string;
+        rows?:string[][]; hasColumnHeader?:boolean;
+        children?: NBlock[]
+        // ── database table ──────────────────────────────────────────────
+        dbColumns?: DBCol[]
+        dbRows?:    DBRow[]
       }
 
-      // Helper: query a database and return its items as blocks
-      const queryDatabase = async (dbId: string): Promise<{type:string;text:string;checked?:boolean;id?:string;url?:string}[]> => {
+      // ── Parse single block
+      const parseBlock = (b: Record<string, unknown>): NBlock => {
+        const t  = b.type as string
+        const c  = (b[t] || {}) as Record<string, unknown>
+        const rt = (c.rich_text || []) as unknown[]
+        const text = rt.map((r:unknown) => (r as {plain_text:string}).plain_text||'').join('')
+        const segments = extractSegs(rt)
+        const id = b.id as string
+        const has_children = !!(b.has_children)
+
+        if (t === 'child_page')     return { type:t, text:(c as {title:string}).title, segments:[], id }
+        if (t === 'child_database') return { type:t, text:(c as {title:string}).title, segments:[], id }
+        if (t === 'divider')        return { type:'divider', text:'', segments:[], id }
+        if (t === 'to_do')          return { type:t, text, segments, checked:!!(c as {checked?:boolean}).checked, id }
+
+        if (t === 'callout') {
+          const ico = (c.icon||{}) as {type?:string; emoji?:string; external?:{url:string}}
+          const icon = ico.type === 'emoji' ? (ico.emoji||'💡') : '💡'
+          return { type:t, text, segments, id, icon, color:(c.color as string)||'gray_background' }
+        }
+
+        if (t === 'image') {
+          const img = c as {type?:string; external?:{url:string}; file?:{url:string}; caption?:unknown[]}
+          const src = img.type === 'external' ? (img.external?.url||'') : (img.file?.url||'')
+          const cap = (img.caption||[]).map((r:unknown)=>(r as {plain_text:string}).plain_text||'').join('')
+          return { type:t, text:cap, segments:[], id, src }
+        }
+
+        if (t === 'code') {
+          return { type:t, text, segments:[], id, color:(c.language as string)||'' }
+        }
+
+        if (t === 'table') {
+          return { type:t, text:'', segments:[], id, has_children,
+            hasColumnHeader:!!(c as {has_column_header?:boolean}).has_column_header }
+        }
+
+        return { type:t, text, segments, id, has_children }
+      }
+
+      // ── Fetch ALL blocks with cursor pagination
+      const fetchAll = async (blockId: string): Promise<Record<string, unknown>[]> => {
+        const all: Record<string, unknown>[] = []
+        let cursor: string | null = null
+        do {
+          const fetchUrl: string = `${API}/blocks/${blockId}/children?page_size=100${cursor ? `&start_cursor=${cursor}` : ''}`
+          const res = await fetch(fetchUrl, { headers: hdr }).then(r => r.json())
+          all.push(...(res.results || []))
+          cursor = res.has_more ? (res.next_cursor as string) : null
+        } while (cursor)
+        return all
+      }
+
+      // ── Fetch full database as table (schema + rows) ─────────────────
+      const fetchDBTable = async (dbId: string): Promise<NBlock | null> => {
         try {
-          const res = await fetch(`${API}/databases/${dbId}/query`, {
-            method: 'POST', headers: H(),
-            body: JSON.stringify({ sorts: [{ timestamp: 'last_edited_time', direction: 'descending' }], page_size: 20 }),
-          }).then(r => r.json())
-          return (res.results || []).map((p: Record<string, unknown>) => {
-            const title = extractTitle(p)
-            const props = (p.properties || {}) as Record<string, Record<string, unknown>>
-            const status = Object.values(props).find(pp => pp?.type === 'status' || pp?.type === 'select')
-            const statusName = (status?.status as {name:string})?.name || (status?.select as {name:string})?.name || ''
-            const text = statusName ? `${title}  [${statusName}]` : title
-            const pageId = (p.id as string)
-            const url = `https://notion.so/${pageId.replace(/-/g,'')}`
-            return { type: 'db_item', text, checked: false, id: pageId, url }
-          }).filter((b: {text:string}) => b.text)
-        } catch { return [] }
+          // 1. Schema + meta
+          const [meta, qRes] = await Promise.all([
+            fetch(`${API}/databases/${dbId}`, { headers: H() }).then(r => r.json()),
+            fetch(`${API}/databases/${dbId}/query`, {
+              method:'POST', headers:H(),
+              body: JSON.stringify({ sorts:[{ timestamp:'last_edited_time', direction:'descending' }], page_size:30 }),
+            }).then(r => r.json()),
+          ])
+
+          const dbTitle = extractTitle(meta)
+          const iconObj = (meta.icon as {type?:string;emoji?:string}|null)
+          const dbIcon  = iconObj?.type==='emoji' ? iconObj.emoji : '🗃'
+
+          // 2. Columns — title bilan birgalikda (max 4 ustun + title)
+          const schemaPropEntries = Object.entries(
+            (meta.properties || {}) as Record<string, Record<string, unknown>>
+          )
+          // Title doim birinchi, qolganlarni oldingi tartibda olamiz
+          const titleColName  = schemaPropEntries.find(([,p]) => p.type==='title')?.[0] || 'Name'
+          const extraCols: DBCol[] = schemaPropEntries
+            .filter(([,p]) => p.type !== 'title' && p.type !== 'created_time' && p.type !== 'last_edited_time')
+            .slice(0, 4)
+            .map(([name, p]) => ({ name, type: p.type as string }))
+          const columns: DBCol[] = [{ name: titleColName, type: 'title' }, ...extraCols]
+
+          // Notion API rang → {bg, fg}
+          const notionColor = (c?: string): {bg:string;fg:string} => {
+            const map: Record<string,{bg:string;fg:string}> = {
+              blue:   {bg:'rgba(35,131,226,0.2)',   fg:'#529cca'},
+              green:  {bg:'rgba(68,131,97,0.2)',    fg:'#4cc38a'},
+              yellow: {bg:'rgba(203,145,47,0.2)',   fg:'#dfab01'},
+              orange: {bg:'rgba(217,115,13,0.2)',   fg:'#d9730d'},
+              red:    {bg:'rgba(212,76,71,0.2)',    fg:'#e03e3e'},
+              purple: {bg:'rgba(144,101,176,0.2)',  fg:'#9065b0'},
+              pink:   {bg:'rgba(173,26,114,0.2)',   fg:'#ad1a72'},
+              brown:  {bg:'rgba(100,71,58,0.2)',    fg:'#64473a'},
+              gray:   {bg:'rgba(120,120,120,0.15)', fg:'#787774'},
+              default:{bg:'rgba(120,120,120,0.15)', fg:'#787774'},
+            }
+            return map[c||'default'] || map.default
+          }
+
+          // 3. Rows
+          const dbRows: DBRow[] = (qRes.results || []).map((p: Record<string, unknown>) => {
+            const title   = extractTitle(p)
+            const pageId  = p.id as string
+            const url     = `https://notion.so/${pageId.replace(/-/g,'')}`
+            const icoObj  = (p as Record<string, unknown>).icon as {type?:string;emoji?:string}|null
+            const icon    = icoObj?.type==='emoji' ? icoObj.emoji : undefined
+            const props   = (p.properties||{}) as Record<string, Record<string, unknown>>
+            const cells: Record<string, DBCell> = {}
+
+            for (const col of extraCols) {
+              const prop = props[col.name]
+              if (!prop) { cells[col.name] = { text:'', kind: col.type }; continue }
+              const kind = prop.type as string
+              if (kind==='status') {
+                const s = prop.status as {name?:string;color?:string}
+                const cl = notionColor(s?.color)
+                cells[col.name] = { text: s?.name||'', color: `${cl.bg}|${cl.fg}`, kind }
+              } else if (kind==='select') {
+                const s = prop.select as {name?:string;color?:string}
+                const cl = notionColor(s?.color)
+                cells[col.name] = { text: s?.name||'', color: `${cl.bg}|${cl.fg}`, kind }
+              } else if (kind==='multi_select') {
+                const ss = (prop.multi_select as {name?:string;color?:string}[])||[]
+                const text = ss.map(s=>s.name||'').join(', ')
+                const cl = ss[0] ? notionColor(ss[0].color) : notionColor()
+                cells[col.name] = { text, color: `${cl.bg}|${cl.fg}`, kind }
+              } else if (kind==='rich_text') {
+                const txt = ((prop.rich_text as {plain_text:string}[])||[])[0]?.plain_text||''
+                cells[col.name] = { text: txt.length > 40 ? txt.slice(0,40)+'…' : txt, kind: 'text' }
+              } else if (kind==='date') {
+                const d = (prop.date as {start?:string})?.start||''
+                cells[col.name] = { text: d ? d.slice(0,10) : '', kind: 'date' }
+              } else if (kind==='number') {
+                cells[col.name] = { text: prop.number!=null ? String(prop.number) : '', kind: 'number' }
+              } else if (kind==='checkbox') {
+                cells[col.name] = { text: prop.checkbox ? '✅' : '⬜', kind: 'checkbox' }
+              } else if (kind==='url') {
+                cells[col.name] = { text: (prop.url as string)||'', kind: 'url' }
+              } else if (kind==='people') {
+                const pp = (prop.people as {name?:string}[])||[]
+                cells[col.name] = { text: pp.map(x=>x.name||'').join(', '), kind: 'people' }
+              } else {
+                cells[col.name] = { text: '', kind }
+              }
+            }
+            return { id: pageId, icon, title, url, cells }
+          })
+
+          return {
+            type:'db_table', text: dbTitle, segments:[], id: dbId,
+            icon: dbIcon, dbColumns: columns, dbRows,
+          } as NBlock
+        } catch { return null }
       }
 
-      // Helper: recursively expand nested blocks (column_list → column → blocks)
-      const expandBlocks = async (rawBlocks: Record<string, unknown>[]): Promise<{type:string;text:string;checked?:boolean}[]> => {
-        const result: {type:string;text:string;checked?:boolean}[] = []
+      // ── Recursively expand blocks (columns, toggles, tables, DBs)
+      const expandBlocks = async (rawBlocks: Record<string, unknown>[], depth=0): Promise<NBlock[]> => {
+        const result: NBlock[] = []
         for (const b of rawBlocks) {
           const t = b.type as string
-          if (t === 'column_list' || t === 'column') {
+
+          // Transparent containers — inline
+          if (t==='column_list' || t==='column' || t==='synced_block') {
             try {
-              const cr = await fetch(`${API}/blocks/${b.id}/children?page_size=50`, { headers: hdr }).then(r => r.json())
-              const nested = await expandBlocks(cr.results || [])
-              result.push(...nested)
+              const ch = await fetchAll(b.id as string)
+              result.push(...await expandBlocks(ch, depth))
             } catch {}
-          } else if (t === 'child_database') {
-            // Show DB title as header
-            const dbTitle = ((b['child_database'] as {title:string})?.title) || 'Database'
-            result.push({ type: 'heading_3', text: `🗄 ${dbTitle}`, checked: false })
-            // Query DB items
-            const items = await queryDatabase(b.id as string)
-            result.push(...items)
-          } else {
-            const parsed = blockText(b)
-            if (parsed.text) result.push(parsed)
+            continue
           }
+
+          // Inline child database — full table
+          if (t==='child_database') {
+            const tbl = await fetchDBTable(b.id as string)
+            if (tbl) result.push(tbl)
+            continue
+          }
+
+          const parsed = parseBlock(b)
+
+          // Toggle: fetch children (limit depth)
+          if (t==='toggle' && b.has_children && depth < 3) {
+            try {
+              const ch = await fetchAll(b.id as string)
+              parsed.children = await expandBlocks(ch, depth+1)
+            } catch {}
+          }
+
+          // Table: fetch rows
+          if (t==='table' && b.has_children) {
+            try {
+              const rowBlocks = await fetchAll(b.id as string)
+              parsed.rows = rowBlocks.map((row: Record<string, unknown>) => {
+                const rd = (row['table_row']||{}) as {cells?:unknown[][]}
+                return (rd.cells||[]).map((cell:unknown[]) =>
+                  (cell||[]).map((r:unknown)=>(r as {plain_text:string}).plain_text||'').join('')
+                )
+              })
+            } catch {}
+          }
+
+          if (parsed.text || ['divider','image','table'].includes(t)) result.push(parsed)
         }
         return result
       }
 
-      const [pageRes, blocksRes] = await Promise.all([
-        fetch(`${API}/pages/${id}`, { headers: H() }).then(r => r.json()),
-        fetch(`${API}/blocks/${id}/children?page_size=50`, { headers: hdr }).then(r => r.json()),
-      ])
-      const title = extractTitle(pageRes)
-      const iconObj = pageRes.icon as {type:string;emoji?:string} | null
-      const emoji = iconObj?.type === 'emoji' ? iconObj.emoji : null
+      // Try fetching as page first; if it's actually a database, route to fetchDBTable
+      const pageRes = await fetch(`${API}/pages/${id}`, { headers: H() }).then(r => r.json())
 
-      // Extract page properties (for database items)
-      const propsRaw = (pageRes.properties || {}) as Record<string, Record<string, unknown>>
+      // Database ID passed — or page API returned an error
+      if (pageRes.object === 'database' || pageRes.object === 'error' || pageRes.status === 404) {
+        const dbTable = await fetchDBTable(id)
+        if (dbTable) {
+          return NextResponse.json({
+            ok: true, title: dbTable.text, emoji: dbTable.icon || '🗃',
+            coverUrl: null, blocks: [dbTable], props: [],
+            url: `https://notion.so/${id.replace(/-/g,'')}`,
+          })
+        }
+        return NextResponse.json({ ok: false, error: 'Failed to read page or database' })
+      }
+
+      const rawBlocks = await fetchAll(id)
+
+      const title   = extractTitle(pageRes)
+      const iconObj = pageRes.icon as {type:string;emoji?:string} | null
+      const emoji   = iconObj?.type === 'emoji' ? iconObj.emoji : null
+      const cover   = pageRes.cover as {type?:string; external?:{url:string}; file?:{url:string}} | null
+      const coverUrl = cover?.type==='external' ? cover.external?.url : cover?.file?.url || null
+
+      // Extract page properties
+      const propsRaw = (pageRes.properties||{}) as Record<string, Record<string, unknown>>
       const props: {name:string; value:string; type:string}[] = []
       for (const [name, prop] of Object.entries(propsRaw)) {
         const t = prop.type as string
         let value = ''
-        if (t === 'status') value = (prop.status as {name:string})?.name || ''
-        else if (t === 'select') value = (prop.select as {name:string})?.name || ''
-        else if (t === 'multi_select') value = ((prop.multi_select as {name:string}[]) || []).map(s=>s.name).join(', ')
-        else if (t === 'date') value = (prop.date as {start:string})?.start || ''
-        else if (t === 'number') value = prop.number !== null ? String(prop.number) : ''
-        else if (t === 'checkbox') value = prop.checkbox ? '✅' : '⬜'
-        else if (t === 'rich_text') value = ((prop.rich_text as {plain_text:string}[]) || [])[0]?.plain_text || ''
-        else if (t === 'title') continue // skip title, already extracted
-        else if (t === 'url') value = prop.url as string || ''
-        if (value) props.push({ name, value, type: t })
+        if (t==='status')       value = (prop.status as {name:string})?.name || ''
+        else if (t==='select')      value = (prop.select as {name:string})?.name || ''
+        else if (t==='multi_select') value = ((prop.multi_select as {name:string}[])||[]).map(s=>s.name).join(', ')
+        else if (t==='date')        value = (prop.date as {start:string})?.start || ''
+        else if (t==='number')      value = prop.number != null ? String(prop.number) : ''
+        else if (t==='checkbox')    value = prop.checkbox ? '✅' : '⬜'
+        else if (t==='rich_text')   value = ((prop.rich_text as {plain_text:string}[])||[])[0]?.plain_text || ''
+        else if (t==='title')       continue
+        else if (t==='url')         value = (prop.url as string) || ''
+        else if (t==='people')      value = ((prop.people as {name:string}[])||[]).map(p=>p.name).join(', ')
+        if (value) props.push({ name, value, type:t })
       }
 
-      const blocks: {type:string;text:string;checked?:boolean;id?:string;url?:string}[] = await expandBlocks(blocksRes.results || [])
-      return NextResponse.json({ ok: true, title, emoji, blocks, props, url: pageRes.url })
-    } catch { return NextResponse.json({ ok: false, error: 'Failed to read page' }) }
+      const blocks = await expandBlocks(rawBlocks)
+      return NextResponse.json({ ok:true, title, emoji, coverUrl, blocks, props, url: pageRes.url })
+    } catch { return NextResponse.json({ ok:false, error:'Failed to read page' }) }
   }
 
   // ── Default: read recent expenses from Notion DB ──────────────────────────

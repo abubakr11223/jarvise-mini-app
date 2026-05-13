@@ -4,13 +4,13 @@ import { NextRequest, NextResponse } from 'next/server'
 const REDIS_URL   = process.env.KV_REST_API_URL  || process.env.UPSTASH_REDIS_REST_URL
 const REDIS_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN
 
-export type Expense = { id: number; name: string; amount: number; type: string; date: string; card?: string; bank?: string }
+type Expense = { id: number; name: string; amount: number; type: string; date: string }
 
 // Node.js global — bir process ichida tezkor xotira
 declare global { var __jonka_exp: Expense[] | undefined }
 if (!global.__jonka_exp) global.__jonka_exp = []
 
-export async function kvGet(): Promise<Expense[]> {
+async function kvGet(): Promise<Expense[]> {
   if (!REDIS_URL || !REDIS_TOKEN) return []
   try {
     const res = await fetch(`${REDIS_URL}/get/jonka_expenses`, {
@@ -72,20 +72,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false }, { status: 400 })
   }
   await kvAdd(newExps)
-  return NextResponse.json({ ok: true })
-}
-
-// DELETE — barcha xarajatlarni tozalash
-export async function DELETE() {
-  global.__jonka_exp = []
-  if (REDIS_URL && REDIS_TOKEN) {
-    try {
-      await fetch(`${REDIS_URL}/set/jonka_expenses`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${REDIS_TOKEN}`, 'Content-Type': 'text/plain' },
-        body: JSON.stringify([]),
-      })
-    } catch {}
-  }
   return NextResponse.json({ ok: true })
 }

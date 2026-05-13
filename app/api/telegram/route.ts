@@ -72,31 +72,49 @@ function isCommonWord(name: string): boolean {
   return false
 }
 
+// Xabar matnini tozalash — boshidagi shovqin va takroriy fe'llarni olib tashlash
+function cleanMsg(msg: string): string {
+  return msg
+    // "yozib koy, aytib koy" takrorlari
+    .replace(/^[,\s]*(?:yozib\s*(?:koy|ko['y]|qo['y])?|aytib\s*(?:koy|ko['y]|qo['y])?)[,\s]*/i, '')
+    // Boshidagi vergul va bo'shliqlar
+    .replace(/^[,\s.]+/, '')
+    .trim()
+}
+
 function parseSendToContact(text: string): { name: string; message: string } | null {
-  // 1. Rus tartibi: "скажи/передай [kim]га/у [nima]"
-  //    "скажи сухроботу что я домой приду позже"
+  // 1. Rus: "скажи/передай [kim]у [nima]"
   const ruFirst = text.match(
     /(?:скажи|передай|напиши|отправь|сообщи)\s+([\wА-Яа-яЎўҚқҒғҲҳ']+?)(?:[уюеияа]|га|ге)?\s+(?:что\s+|чтобы\s+)?(.+)/i
   )
   if (ruFirst) {
     const name = normName(ruFirst[1])
-    // Umumiy so'z bo'lsa — kontakt emas
     if (isCommonWord(name)) return null
     return { name, message: ruFirst[2].trim() }
   }
 
-  // 2. O'zbek tartibi: "[kim]ga ayt/yoz/de [nima]"
-  //    "Suxrobga ayt ertaga boraman"
+  // 2. O'zbek: "[kim]ga/ka ayt/yoz [nima]" — boshdan
   const uzFirst = text.match(
-    /^([\wА-Яа-яЎўҚқҒғҲҳ']+?)(?:га|ге|ge|ga|ка|ke)\s+(?:ayt|ayting|de|deng|yoz|yuvor|yetkaz|jibor|передай|скажи|напиши)\s+(.+)/i
+    /^([\wА-Яа-яЎўҚқҒғҲҳ']+?)(?:га|ге|ge|ga|ка|ke|ka|qa)\s+(?:ayt(?:ib\s*(?:koy|ko['y]|qo['y])?)?|ayting|de(?:ng)?|yoz(?:ib\s*(?:koy|ko['y]|qo['y])?)?|yuvor|yetkaz|jibor|передай|скажи|напиши)\s*[,.]?\s*(.+)/i
   )
   if (uzFirst) {
     const name = normName(uzFirst[1])
     if (isCommonWord(name)) return null
-    return { name, message: uzFirst[2].trim() }
+    return { name, message: cleanMsg(uzFirst[2]) }
   }
 
-  // 3. "[kim]га скажи / [kim]га де" — aralash
+  // 3. O'zbek: "[kim]a aytib koy / [kim]ga aytib koy" — matn ichida (shovqin bilan)
+  //    "mulk tu tapib, mulka aytib koy, ertaga men ishga boraman"
+  const uzAytib = text.match(
+    /(?:^|[,.\s]+)([\wА-Яа-яЎўҚқҒғҲҳ']{2,}?)(?:га|ge|ga|ka|qa|a(?=\s+ayt|a\s+yoz))\s+(?:ayt(?:ib\s*(?:koy|ko['y]|qo['y])?)?|yoz(?:ib\s*(?:koy|ko['y]|qo['y])?)?)\s*[,.]?\s*(.+)/i
+  )
+  if (uzAytib) {
+    const name = normName(uzAytib[1])
+    if (isCommonWord(name)) return null
+    return { name, message: cleanMsg(uzAytib[2]) }
+  }
+
+  // 4. "[kim]га скажи / [kim]га де" — aralash
   const mixed = text.match(
     /^([\wА-Яа-яЎўҚқҒғҲҳ']+?)(?:га|ге|ge|ga)\s+(?:скажи|передай|de|ayt|yoz)\s+(.+)/i
   )
@@ -109,38 +127,67 @@ function parseSendToContact(text: string): { name: string; message: string } | n
   return null
 }
 
+// ── Nom bo'yicha fuzzy score ─────────────────────────────────────────────
+function fuzzyScore(title: string, firstName: string, q: string): number {
+  const qLat      = cyrToLat(q)
+  const qFirst    = q.slice(0, 4)
+  const qLatFirst = qLat.slice(0, 4)
+  const cn        = title.toLowerCase()
+  const cfn       = firstName.toLowerCase()
+  if (cn === q || cfn === q)                               return 10
+  if (cn === qLat || cfn === qLat)                         return 10
+  if (cn.startsWith(q) || cfn.startsWith(q))               return 8
+  if (cn.startsWith(qLat) || cfn.startsWith(qLat))         return 8
+  if (cn.includes(q) || cfn.includes(q))                   return 6
+  if (cn.includes(qLat) || cfn.includes(qLat))             return 6
+  const cnLat = cyrToLat(cn)
+  if (cnLat.startsWith(qLat) || cnLat.includes(qLat))      return 5
+  if (cn.startsWith(qFirst) || cfn.startsWith(qFirst))     return 3
+  if (cn.startsWith(qLatFirst) || cfn.startsWith(qLatFirst)) return 3
+  return 0
+}
+
 // ── Kontaktni nomdan izlash (Redis cache) ─────────────────────────────────
 async function findContact(name: string): Promise<{ id: string; username: string; phone: string; name: string } | null> {
   const raw = await redisGetStr('tg_userbot_contacts_cache')
   if (!raw) return null
   try {
     const contacts: { id: string; name: string; firstName: string; username: string; phone: string }[] = JSON.parse(raw)
-
-    const q      = name.toLowerCase()          // e.g. "сухроб"
-    const qLat   = cyrToLat(q)                 // e.g. "suxrob"
-    const qFirst = q.slice(0, 4)               // first 4 chars for fuzzy
-    const qLatFirst = qLat.slice(0, 4)
-
-    const score = (c: typeof contacts[0]) => {
-      const cn  = c.name.toLowerCase()
-      const cfn = c.firstName.toLowerCase()
-      if (cn === q || cfn === q)               return 10  // to'liq mos
-      if (cn === qLat || cfn === qLat)         return 10
-      if (cn.startsWith(q) || cfn.startsWith(q))      return 8
-      if (cn.startsWith(qLat) || cfn.startsWith(qLat)) return 8
-      if (cn.includes(q) || cfn.includes(q))  return 6
-      if (cn.includes(qLat) || cfn.includes(qLat)) return 6
-      // Kirill kontakt, Lotin qidiruv (yoki aksincha)
-      const cnLat = cyrToLat(cn)
-      if (cnLat.startsWith(qLat) || cnLat.includes(qLat)) return 5
-      if (cn.startsWith(qFirst) || cfn.startsWith(qFirst))   return 3
-      if (cn.startsWith(qLatFirst) || cfn.startsWith(qLatFirst)) return 3
-      return 0
-    }
-
-    const best = contacts.map(c => ({ c, s: score(c) })).filter(x => x.s > 0).sort((a,b)=>b.s-a.s)[0]
+    const q = name.toLowerCase()
+    const best = contacts
+      .map(c => ({ c, s: fuzzyScore(c.name, c.firstName, q) }))
+      .filter(x => x.s > 0)
+      .sort((a, b) => b.s - a.s)[0]
     return best?.c || null
   } catch { return null }
+}
+
+// ── Chat (guruh/kanal)ni nomdan izlash ────────────────────────────────────
+async function findChat(name: string): Promise<{ id: string; username: string; title: string; type: string } | null> {
+  const raw = await redisGetStr('tg_userbot_chats_cache')
+  if (!raw) return null
+  try {
+    const chats: { id: string; title: string; username: string; type: string }[] = JSON.parse(raw)
+    // Faqat guruh va kanallarni qidirish (private emas)
+    const groups = chats.filter(c => c.type !== 'private')
+    const q = name.toLowerCase()
+    const best = groups
+      .map(c => ({ c, s: fuzzyScore(c.title, c.title, q) }))
+      .filter(x => x.s > 0)
+      .sort((a, b) => b.s - a.s)[0]
+    return best?.c || null
+  } catch { return null }
+}
+
+// ── Kontakt YOKI chat topish ──────────────────────────────────────────────
+async function findContactOrChat(name: string): Promise<{
+  entity: { id: string; username: string; name: string }
+  isGroup: boolean
+} | null> {
+  const [contact, chat] = await Promise.all([findContact(name), findChat(name)])
+  if (contact) return { entity: { id: contact.id, username: contact.username, name: contact.name }, isGroup: false }
+  if (chat)    return { entity: { id: chat.id, username: chat.username, name: chat.title }, isGroup: true }
+  return null
 }
 
 // ── ElevenLabs TTS → Ovoz (Buffer) ───────────────────────────────────────
@@ -172,7 +219,7 @@ async function generateTTS(text: string): Promise<Buffer | null> {
 
 // ── Userbot orqali xabar (matn yoki ovoz) yuborish ───────────────────────
 async function sendViaUserbot(
-  contact: { id: string; username: string; phone: string; name: string },
+  contact: { id: string; username: string; phone?: string; name: string },
   message: string,
   asVoice = false
 ): Promise<{ ok: boolean; sentAsVoice: boolean }> {
@@ -195,7 +242,7 @@ async function sendViaUserbot(
 
     const entity = contact.username
       ? `@${contact.username.replace('@', '')}`
-      : contact.phone || contact.id
+      : contact.phone || contact.id   // guruh uchun raqamli ID
 
     // Ovozli xabar: TTS → sendFile
     if (asVoice) {
@@ -655,6 +702,28 @@ async function analyzePhoto(file_id: string): Promise<string> {
   } catch { return '' }
 }
 
+// ── Qozog'cha/noto'g'ri transkriptsiyani O'zbekchaga normalizatsiya ────────
+function normalizeTranscript(text: string): string {
+  return text
+    // Qozog'cha harflar → lotincha/kirill ekvivalent
+    .replace(/ұ/g, 'u').replace(/Ұ/g, 'U')
+    .replace(/ү/g, 'u').replace(/Ү/g, 'U')
+    .replace(/ң/g, 'ng').replace(/Ң/g, 'Ng')
+    .replace(/і/g, 'i').replace(/І/g, 'I')
+    // Qozog'cha fe'llar → O'zbek
+    .replace(/\bязген\b/gi, 'yozgan').replace(/\bжазган\b/gi, 'yozgan')
+    .replace(/\bайтқан\b/gi, 'aytgan').replace(/\bайтқанбол\b/gi, 'aytgan')
+    .replace(/\bжаз\b/gi, 'yoz').replace(/\bяз\b/gi, 'yoz')
+    // Qozog'cha vaqt/joy so'zlari → O'zbek
+    .replace(/\bертеге\b/gi, 'ertaga').replace(/\bертең\b/gi, 'ertaga')
+    .replace(/\bішке\b/gi, 'ishga').replace(/\bіске\b/gi, 'ishga')
+    .replace(/\bбарамын\b/gi, 'boraman').replace(/\bкелемін\b/gi, 'kelaman')
+    .replace(/\bкетемін\b/gi, 'ketaman').replace(/\bбілемін\b/gi, 'bilaman')
+    // "батыға" + "язген/ayt" → "[name]ga ayt" pattern fix
+    .replace(/(\w+)ға\s+язген[,.]?\s*/gi, '$1ga ayt ')
+    .replace(/(\w+)га\s+язген[,.]?\s*/gi, '$1ga ayt ')
+}
+
 // ── Ovozni matnga aylantirish ─────────────────────────────────────────────
 async function transcribeVoice(file_id: string): Promise<string> {
   if (!BOT_TOKEN) return ''
@@ -673,25 +742,31 @@ async function transcribeVoice(file_id: string): Promise<string> {
     const fd = new FormData()
     fd.append('file', blob, 'voice.ogg')
     fd.append('model_id', 'scribe_v1')
-    // language_code YO'Q → auto-detect (O'zbek + Rus)
+    fd.append('language_code', 'uz')   // O'zbek tili majburiy → Qozog'cha aralashmaydi
     fd.append('tag_audio_events', 'false')
     fd.append('num_speakers', '1')
     const res = await fetch('https://api.elevenlabs.io/v1/speech-to-text', {
       method: 'POST', headers: { 'xi-api-key': ELEVENLABS }, body: fd,
     })
-    if (res.ok) { const d = await res.json(); if (d.text) return d.text }
+    if (res.ok) {
+      const d = await res.json()
+      if (d.text) return normalizeTranscript(d.text)
+    }
   }
   if (GROQ) {
     const fd = new FormData()
     fd.append('file', blob, 'voice.ogg')
     fd.append('model', 'whisper-large-v3')
-    // language YO'Q → Whisper auto-detect
+    fd.append('language', 'uz')        // Whisper: O'zbek tili
     fd.append('response_format', 'json')
-    fd.append('prompt', "xarajat, daromat, qarz, ming so'm, berdim, oldim, расход, доход, долг, зарплата, тысяч, сум")
+    fd.append('prompt', "O'zbek va Rus tilida: xarajat, daromat, qarz, ming so'm, berdim, oldim, расход, доход, долг, зарплата, ayt, yoz, yuvor, salom, ertaga, ishga, boraman")
     const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
       method: 'POST', headers: { Authorization: `Bearer ${GROQ}` }, body: fd,
     })
-    if (res.ok) { const d = await res.json(); return d.text || '' }
+    if (res.ok) {
+      const d = await res.json()
+      if (d.text) return normalizeTranscript(d.text)
+    }
   }
   return ''
 }
@@ -733,6 +808,36 @@ function isQuestion(text: string): boolean {
                'what is','how','who is','where','when','why','tell me','объясни','расскажи']
   const lower = text.toLowerCase()
   return qw.some(w => lower.includes(w))
+}
+
+// ── Groq LLM — n8n ishlamasa zaxira javob ────────────────────────────────
+async function askGroq(text: string, lang: 'ru' | 'uz'): Promise<string> {
+  const GROQ = process.env.GROQ_API_KEY
+  if (!GROQ) return ''
+  try {
+    const sys = lang === 'ru'
+      ? 'Ты Jarvis — персональный AI-ассистент. Отвечай кратко и по делу на русском языке. Не задавай лишних вопросов.'
+      : "Siz Jarvis — shaxsiy AI yordamchi. O'zbek tilida qisqa va aniq javob bering. Ortiqcha savol bermang."
+    const ctrl  = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 10000)
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST', signal: ctrl.signal,
+      headers: { Authorization: `Bearer ${GROQ}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages: [
+          { role: 'system', content: sys },
+          { role: 'user',   content: text },
+        ],
+        max_tokens: 600,
+        temperature: 0.7,
+      }),
+    })
+    clearTimeout(timer)
+    if (!res.ok) return ''
+    const d = await res.json()
+    return d.choices?.[0]?.message?.content?.trim() || ''
+  } catch { return '' }
 }
 
 // ── n8n AI ga yuborish (8 soniya timeout) ────────────────────────────────
@@ -1065,33 +1170,42 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true })
     }
 
-    // ── 0g2. Kontaktga ovozli / matn xabar yuborish ──────────────────────
-    // "Suxrobga ayt ertaga ishga boraman" / "Alishga yoz salom deb"
+    // ── 0g2. Kontakt yoki guruhga ovozli / matn xabar yuborish ─────────────
+    // "Suxrobga ayt ertaga ishga boraman" / "Dev guruhiga yoz meeting holda"
     const sendCmd = parseSendToContact(text)
     if (sendCmd) {
-      const contact = await findContact(sendCmd.name)
+      const found = await findContactOrChat(sendCmd.name)
 
-      if (!contact) {
+      if (!found) {
         await sendMessage(chat_id, lang === 'ru'
-          ? `👤 *"${sendCmd.name}"* контакт-листе не найден.\n\n💡 Откройте Mini App → Контакты → синхронизируйте список`
-          : `👤 *"${sendCmd.name}"* kontaktlar orasida topilmadi.\n\n💡 Mini App → Kontaktlar → ro'yxatni yangilang`)
+          ? `👤 *"${sendCmd.name}"* не найден в контактах и чатах.\n\n💡 Откройте Mini App → Контакты → обновите список`
+          : `👤 *"${sendCmd.name}"* kontaktlar va chatlarda topilmadi.\n\n💡 Mini App → Kontaktlar → ro'yxatni yangilang`)
         return NextResponse.json({ ok: true })
       }
 
-      await sendMessage(chat_id, lang === 'ru'
-        ? `📤 _Отправляю ${process.env.ELEVENLABS_API_KEY ? 'голосовое' : 'сообщение'} → *${contact.name}*..._`
-        : `📤 _${contact.name}ga ${process.env.ELEVENLABS_API_KEY ? 'ovozli xabar' : 'xabar'} yuborilmoqda..._`)
+      const { entity, isGroup } = found
+      const typeIcon = isGroup ? '👥' : '👤'
 
-      const isVoice = !!process.env.ELEVENLABS_API_KEY
-      const sendResult = await sendViaUserbot(contact, sendCmd.message, isVoice)
+      // Guruhga ovoz emas, faqat matn
+      const useVoice = !isGroup && !!process.env.ELEVENLABS_API_KEY
+
+      await sendMessage(chat_id, lang === 'ru'
+        ? `📤 _Отправляю ${useVoice ? 'голосовое' : 'сообщение'} → ${typeIcon} *${entity.name}*..._`
+        : `📤 _${entity.name}ga ${useVoice ? 'ovozli xabar' : 'xabar'} yuborilmoqda..._`)
+
+      const sendResult = await sendViaUserbot(
+        { id: entity.id, username: entity.username, name: entity.name },
+        sendCmd.message,
+        useVoice
+      )
 
       if (sendResult.ok) {
         const sentType = sendResult.sentAsVoice
           ? (lang === 'ru' ? 'Голосовое' : 'Ovozli xabar')
           : (lang === 'ru' ? 'Сообщение' : 'Xabar')
         await sendMessage(chat_id, lang === 'ru'
-          ? `✅ *${sentType} отправлено!*\n\n👤 *${contact.name}*\n💬 _"${sendCmd.message.slice(0, 120)}"_`
-          : `✅ *${sentType} yuborildi!*\n\n👤 *${contact.name}*\n💬 _"${sendCmd.message.slice(0, 120)}"_`)
+          ? `✅ *${sentType} отправлено!*\n\n${typeIcon} *${entity.name}*\n💬 _"${sendCmd.message.slice(0, 120)}"_`
+          : `✅ *${sentType} yuborildi!*\n\n${typeIcon} *${entity.name}*\n💬 _"${sendCmd.message.slice(0, 120)}"_`)
       } else {
         await sendMessage(chat_id, lang === 'ru'
           ? `❌ Не удалось отправить. Убедитесь, что Telegram аккаунт подключён в Mini App → Контакты`
@@ -1436,8 +1550,14 @@ export async function POST(request: NextRequest) {
           if (reply) {
             await sendMessage(chat_id, cleanReply(reply))
           } else {
-            // n8n javob bermasa — to'g'ridan Notion ma'lumotini chiqaramiz
-            await sendMessage(chat_id, `📄 *Notion — natijalar:*\n\n${notionData.slice(0, 3800)}`)
+            // n8n timeout → Groq bilan tahlil qilamiz
+            const groqReply = await askGroq(ctx, lang)
+            if (groqReply) {
+              await sendMessage(chat_id, cleanReply(groqReply))
+            } else {
+              // AI ham ishlamasa — to'g'ridan Notion ma'lumotini chiqaramiz
+              await sendMessage(chat_id, `📄 *Notion — natijalar:*\n\n${notionData.slice(0, 3800)}`)
+            }
           }
         } else {
           await sendMessage(chat_id, lang === 'ru'
@@ -1472,8 +1592,14 @@ export async function POST(request: NextRequest) {
       if (rawReply) {
         await sendMessage(chat_id, cleanReply(rawReply))
       } else {
-        const msg = lang === 'ru' ? '🤔 Нет ответа. Попробуйте ещё раз.' : "🤔 Javob kelmadi. Qayta urinib ko'ring."
-        await sendMessage(chat_id, msg)
+        // n8n javob bermadi → Groq bilan zaxira javob
+        const groqReply = await askGroq(text, lang)
+        if (groqReply) {
+          await sendMessage(chat_id, cleanReply(groqReply))
+        } else {
+          const msg = lang === 'ru' ? '⏳ Сервер перегружен. Попробуйте через 10 секунд.' : "⏳ Server band. 10 soniyadan keyin qayta urinib ko'ring."
+          await sendMessage(chat_id, msg)
+        }
       }
     }
   } catch (e) { console.error('TG webhook:', e) }

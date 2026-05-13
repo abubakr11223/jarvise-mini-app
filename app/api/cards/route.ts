@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { kvGet as getExpenses } from '../expenses/route'
 
 export const runtime = 'nodejs'
 
@@ -7,15 +8,17 @@ const REDIS_TOKEN = process.env.KV_REST_API_TOKEN  || process.env.UPSTASH_REDIS_
 const PAYME_KEY   = process.env.PAYME_MERCHANT_KEY  // optional: "merchant_id:secret"
 
 export type Card = {
-  id:       number
-  last4:    string
-  expiry:   string    // "MM/YY"
-  holder:   string
-  brand:    'uzcard' | 'humo' | 'visa' | 'mastercard' | 'other'
-  token?:   string    // Payme token (if integrated)
-  verified: boolean
-  addedAt:  string
-  color?:   string    // gradient id: blue, green, purple, etc.
+  id:               number
+  last4:            string
+  expiry:           string    // "MM/YY"
+  holder:           string
+  brand:            'uzcard' | 'humo' | 'visa' | 'mastercard' | 'other'
+  token?:           string    // Payme token (if integrated)
+  verified:         boolean
+  addedAt:          string
+  color?:           string    // gradient id: blue, green, purple, etc.
+  balance?:         number    // oxirgi SMS dan olingan qoldiq
+  lastBalanceDate?: string    // qoldiq yangilangan vaqt
 }
 
 // ── Redis helpers ─────────────────────────────────────────────────────────
@@ -88,10 +91,31 @@ async function paymeVerify(token: string, code: string) {
   } catch { return false }
 }
 
-// ── GET — kartalar ro'yxati ───────────────────────────────────────────────
-export async function GET() {
+// ── GET — kartalar ro'yxati (+ ixtiyoriy: ?txs=1 tranzaksiyalar bilan) ────
+export async function GET(req: NextRequest) {
+  const url  = new URL(req.url)
+  const withTxs = url.searchParams.get('txs') === '1'
   const cards = await kvGet()
-  return NextResponse.json({ ok: true, cards })
+
+  if (!withTxs) return NextResponse.json({ ok: true, cards })
+
+  // Barcha xarajatlarni olib, karta bo'yicha filtrlash
+  const expenses  = await getExpenses()
+  const now       = new Date()
+  const monthStr  = now.toLocaleDateString('ru-RU', { month: '2-digit', year: '2-digit' })
+    .replace(/\//g, '.')  // "05.26"
+
+  // Karta bo'yicha statistika
+  const stats: Record<string, { monthSpent: number; monthIncome: number; txs: typeof expenses }> = {}
+  for (const c of cards) {
+    const cTxs   = expenses.filter(e => e.card === c.last4).slice(0, 20)
+    const month  = cTxs.filter(e => e.date?.includes(monthStr.slice(0,2)))
+    const spent  = month.filter(e => e.type === 'XARAJAT').reduce((s,e) => s + e.amount, 0)
+    const income = month.filter(e => e.type === 'DAROMAT').reduce((s,e) => s + e.amount, 0)
+    stats[c.last4] = { monthSpent: spent, monthIncome: income, txs: cTxs }
+  }
+
+  return NextResponse.json({ ok: true, cards, stats })
 }
 
 // ── POST — qo'shish / tasdiqlash / o'chirish ─────────────────────────────

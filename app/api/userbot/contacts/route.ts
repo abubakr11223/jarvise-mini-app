@@ -1,5 +1,5 @@
 // Telegram shaxsiy akkauntdagi barcha kontaktlar
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { TelegramClient } from 'telegram'
 import { StringSession } from 'telegram/sessions'
 import { Api } from 'telegram/tl'
@@ -95,6 +95,78 @@ export async function GET() {
     await kvSetObj('tg_userbot_contacts_cache', contacts, 300)
 
     return NextResponse.json({ ok: true, contacts, total: contacts.length })
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return NextResponse.json({ ok: false, error: msg })
+  }
+}
+
+// POST — telefon raqam orqali kontakt qo'shish (Telegramga import)
+export async function POST(req: NextRequest) {
+  const session = await kvGet('tg_userbot_session')
+  if (!session) return NextResponse.json({ ok: false, error: 'Ulangan emas.' })
+
+  const body = await req.json().catch(() => ({})) as {
+    phone: string; firstName?: string; lastName?: string
+  }
+  const phone = (body.phone || '').trim()
+  if (!phone) return NextResponse.json({ ok: false, error: 'Telefon raqami kerak' })
+
+  // Raqamni formatlash: + bilan boshlash
+  const cleanPhone = phone.startsWith('+') ? phone : `+${phone}`
+
+  try {
+    const client = new TelegramClient(
+      new StringSession(session), API_ID, API_HASH,
+      { connectionRetries: 2, timeout: 20 }
+    )
+    await client.connect()
+
+    // Telegramga import qilish
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const InputPhoneContact = Api.InputPhoneContact as any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ImportContacts = Api.contacts.ImportContacts as any
+    const result = await client.invoke(new ImportContacts({
+      contacts: [new InputPhoneContact({
+        clientId:  Date.now(),
+        phone:     cleanPhone,
+        firstName: body.firstName || cleanPhone,
+        lastName:  body.lastName  || '',
+      })],
+    }))
+
+    await client.disconnect()
+
+    // Cache ni o'chirish (yangi kontakt qo'shildi)
+    if (REDIS_URL && REDIS_TOKEN) {
+      await fetch(`${REDIS_URL}/del/tg_userbot_contacts_cache`, {
+        method: 'POST', headers: { Authorization: `Bearer ${REDIS_TOKEN}` },
+      }).catch(() => {})
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = result as any
+    const imported = res.imported || []
+    const users    = (res.users || []) as Api.User[]
+
+    if (imported.length === 0 && users.length === 0) {
+      return NextResponse.json({ ok: false, error: 'Foydalanuvchi topilmadi. Bu raqam Telegramda ro\'yxatdan o\'tmagan.' })
+    }
+
+    const u = users[0] as Api.User | undefined
+    return NextResponse.json({
+      ok: true,
+      contact: u ? {
+        id:        u.id?.toString() || '',
+        name:      [u.firstName, u.lastName].filter(Boolean).join(' ') || cleanPhone,
+        firstName: u.firstName || '',
+        lastName:  u.lastName  || '',
+        username:  u.username  || '',
+        phone:     u.phone     || cleanPhone,
+        online:    false,
+      } : null,
+    })
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
     return NextResponse.json({ ok: false, error: msg })

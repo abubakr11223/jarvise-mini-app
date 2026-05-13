@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useRef, useMemo } from 'react'
+import React, { useEffect, useState, useRef, useMemo } from 'react'
 import { Mic, X, Send, User, Bot, MicOff, TrendingDown, TrendingUp,
   Trash2, Clock, Search, HandCoins, CheckSquare, Square, MessageCircle,
   StickyNote, CheckCircle2, Plus, Camera, Home as HomeIcon, BarChart2, ShoppingCart,
@@ -122,7 +122,9 @@ export default function Home() {
   const [budgetForm, setBudgetForm] = useState({ category: '', amount: '' })
 
   // ── Cards ────────────────────────────────────────────────────────────────
-  type CardItem = { id:number; last4:string; expiry:string; holder:string; brand:string; verified:boolean; addedAt:string; color?:string }
+  type CardTx = { id:number; name:string; amount:number; type:string; date:string; card?:string; bank?:string }
+  type CardItem = { id:number; last4:string; expiry:string; holder:string; brand:string; verified:boolean; addedAt:string; color?:string; balance?:number; lastBalanceDate?:string }
+  type CardStats = { monthSpent:number; monthIncome:number; txs:CardTx[] }
   const CARD_GRADIENTS = [
     { id:'blue',   cls:'from-blue-700 via-blue-600 to-indigo-500',      label:'Ko\'k'     },
     { id:'green',  cls:'from-emerald-700 via-green-600 to-teal-500',    label:'Yashil'   },
@@ -141,11 +143,12 @@ export default function Home() {
   const [cardsOpen,      setCardsOpen]      = useState(false)
   const [cards,          setCards]          = useState<CardItem[]>([])
   const [cardsLoading,   setCardsLoading]   = useState(false)
+  const [cardStats,      setCardStats]      = useState<Record<string,CardStats>>({})
   const [cardForm,       setCardForm]       = useState({ number:'', expiry:'', holder:'' })
   const [cardColorPick,  setCardColorPick]  = useState('blue')
   const [cardOtp,        setCardOtp]        = useState('')
   const [cardOtpToken,   setCardOtpToken]   = useState('')
-  const [cardStep,       setCardStep]       = useState<'list'|'add'|'otp'>('list')
+  const [cardStep,       setCardStep]       = useState<'list'|'add'|'otp'|'shortcut'>('list')
   const [cardError,      setCardError]      = useState('')
   const [cardAdding,     setCardAdding]     = useState(false)
   const [cardActiveIdx,  setCardActiveIdx]  = useState(0)
@@ -170,8 +173,8 @@ export default function Home() {
   const loadCards = async () => {
     setCardsLoading(true)
     try {
-      const d = await fetch('/api/cards').then(r=>r.json())
-      if (d.ok) setCards(d.cards || [])
+      const d = await fetch('/api/cards?txs=1').then(r=>r.json())
+      if (d.ok) { setCards(d.cards || []); setCardStats(d.stats || {}) }
     } catch {}
     setCardsLoading(false)
   }
@@ -207,10 +210,14 @@ export default function Home() {
     setCardActiveIdx(0)
   }
 
-  // ── Userbot / Contacts ───────────────────────────────────────────────────
+  // ── Userbot / Contacts & Chats ──────────────────────────────────────────
   type TgContact = { id:string; name:string; firstName:string; lastName:string; username:string; phone:string; online:boolean; lastSeen?:string }
+  type TgChat    = { id:string; title:string; type:'private'|'group'|'supergroup'|'channel'; username:string; unread:number; lastMsg:string; lastDate:string; pinned:boolean; membersCount?:number }
   const [contactsOpen,    setContactsOpen]    = useState(false)
   const [contacts,        setContacts]        = useState<TgContact[]>([])
+  const [chats,           setChats]           = useState<TgChat[]>([])
+  const [chatsLoading,    setChatsLoading]    = useState(false)
+  const [contactsTab,     setContactsTab]     = useState<'contacts'|'chats'>('contacts')
   const [contactsLoading, setContactsLoading] = useState(false)
   const [contactsStep,    setContactsStep]    = useState<'check'|'phone'|'code'|'2fa'|'qr'|'done'>('check')
   const [contactsPhone,   setContactsPhone]   = useState('+998')
@@ -220,8 +227,25 @@ export default function Home() {
   const [contactsError,   setContactsError]   = useState('')
   const [contactsSearch,  setContactsSearch]  = useState('')
   const [selContact,      setSelContact]      = useState<TgContact|null>(null)
+  const [selChat,         setSelChat]         = useState<TgChat|null>(null)
+  const [chatHistory,     setChatHistory]     = useState<{id:number;text:string;date:string;out:boolean;from:string|null}[]>([])
+  const [chatHistoryLoad, setChatHistoryLoad] = useState(false)
+  const [chatHistoryLoaded, setChatHistoryLoaded] = useState(false) // true = loaded (hatto bo'sh bo'lsa ham)
+  const chatHistoryEndRef = useRef<HTMLDivElement|null>(null)
   const [contactMsg,      setContactMsg]      = useState('')
   const [sendingMsg,      setSendingMsg]      = useState(false)
+  // Kontakt qo'shish (telefon orqali)
+  const [addContactOpen,  setAddContactOpen]  = useState(false)
+  const [addContactPhone, setAddContactPhone] = useState('+998')
+  const [addContactName,  setAddContactName]  = useState('')
+  const [addContactRes,   setAddContactRes]   = useState<{id:string;name:string;username:string;phone:string}|null>(null)
+  const [addContactErr,   setAddContactErr]   = useState('')
+  const [addContactLoad,  setAddContactLoad]  = useState(false)
+  // Ovoz xabar
+  const [isVoiceRec,      setIsVoiceRec]      = useState(false)
+  const [voiceSeconds,    setVoiceSeconds]    = useState(0)
+  const chatVoiceTimerRef = useRef<ReturnType<typeof setInterval>|null>(null)
+  const voiceBlobRef  = useRef<Blob|null>(null)
   const [qrUrl,           setQrUrl]           = useState('')
   const [qrToken,         setQrToken]         = useState('')
   const qrPollRef = useRef<ReturnType<typeof setInterval>|null>(null)
@@ -230,8 +254,10 @@ export default function Home() {
     setContactsOpen(true); setContactsLoading(true); setContactsError('')
     try {
       const d = await fetch('/api/userbot/auth').then(r=>r.json())
-      if (d.connected) { setContactsStep('done'); setContactsUser(d.user); loadContacts() }
-      else { setContactsStep('phone') }
+      if (d.connected) {
+        setContactsStep('done'); setContactsUser(d.user)
+        loadContacts(); loadChats()
+      } else { setContactsStep('phone') }
     } catch { setContactsStep('phone') }
     setContactsLoading(false)
   }
@@ -243,6 +269,15 @@ export default function Home() {
       if (d.ok) setContacts(d.contacts || [])
     } catch {}
     setContactsLoading(false)
+  }
+
+  const loadChats = async (refresh = false) => {
+    setChatsLoading(true)
+    try {
+      const d = await fetch(`/api/userbot/chats${refresh?'?refresh=1':''}`).then(r=>r.json())
+      if (d.ok) setChats(d.chats || [])
+    } catch {}
+    setChatsLoading(false)
   }
 
   const contactsAuth = async (action: string, payload: Record<string,string>) => {
@@ -259,14 +294,140 @@ export default function Home() {
     setContactsLoading(false)
   }
 
+  // Telefon raqam orqali kontakt qo'shish (Telegramga import)
+  const importContact = async () => {
+    const phone = addContactPhone.trim()
+    if (!phone || phone === '+998') return
+    setAddContactLoad(true); setAddContactErr(''); setAddContactRes(null)
+    try {
+      const d = await fetch('/api/userbot/contacts', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ phone, firstName: addContactName.trim() || phone }),
+      }).then(r=>r.json())
+      if (d.ok && d.contact) {
+        setAddContactRes(d.contact)
+        // Contacts listini yangilash
+        loadContacts()
+      } else {
+        setAddContactErr(d.error || 'Topilmadi')
+      }
+    } catch { setAddContactErr('Ulanishda xato') }
+    setAddContactLoad(false)
+  }
+
+  const openFoundContact = (u: {id:string;name:string;username:string;phone:string}) => {
+    const contact: TgContact = { id:u.id, name:u.name, firstName:u.name.split(' ')[0]||'', lastName:u.name.split(' ').slice(1).join(' ')||'', username:u.username, phone:u.phone, online:false }
+    setAddContactOpen(false); setAddContactPhone('+998'); setAddContactName(''); setAddContactRes(null)
+    setSelContact(contact); setSelChat(null); setContactMsg('')
+    loadChatHistory(contact, null)
+  }
+
+  // Ovoz yozish boshlash
+  const startVoiceRecord = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mr = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm' })
+      mediaRecorderRef.current = mr
+      audioChunksRef.current   = []
+      mr.ondataavailable = e => { if (e.data.size>0) audioChunksRef.current.push(e.data) }
+      mr.onstop = () => {
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/ogg' })
+        voiceBlobRef.current = blob
+        stream.getTracks().forEach(t=>t.stop())
+      }
+      mr.start(100)
+      setIsVoiceRec(true); setVoiceSeconds(0)
+      chatVoiceTimerRef.current = setInterval(()=>setVoiceSeconds(s=>s+1), 1000)
+    } catch { setContactsError('Mikrofon ruxsati kerak') }
+  }
+
+  // Ovoz yozishni to'xtatib yuborish
+  const stopAndSendVoice = async () => {
+    if (!mediaRecorderRef.current) return
+    mediaRecorderRef.current.stop()
+    if (chatVoiceTimerRef.current) clearInterval(chatVoiceTimerRef.current)
+    setIsVoiceRec(false)
+    setSendingMsg(true)
+    // MediaRecorder to'xtagunicha kutish
+    await new Promise(r=>setTimeout(r,300))
+    try {
+      const blob = voiceBlobRef.current
+      if (!blob) { setSendingMsg(false); return }
+
+      const target   = selContact || selChat
+      const form     = new FormData()
+      form.append('audio', blob, 'voice.ogg')
+      if (selContact) {
+        form.append('target',     selContact.username || selContact.id)
+        form.append('targetType', selContact.username ? 'username' : 'userId')
+      } else if (selChat) {
+        form.append('target',     selChat.id)
+        form.append('targetType', 'chatId')
+      }
+
+      if (!target) { setSendingMsg(false); return }
+      const d = await fetch('/api/userbot/messages', { method:'POST', body: form }).then(r=>r.json())
+      if (d.ok) {
+        const now = new Date().toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})
+        setChatHistory(p=>[...p,{id:Date.now(),text:'',date:now,out:true,from:null}])
+        setTimeout(()=>chatHistoryEndRef.current?.scrollIntoView({behavior:'smooth'}),80)
+      } else {
+        setContactsError(d.error||'Yuborib bo\'lmadi')
+      }
+    } catch { setContactsError('Xato') }
+    setSendingMsg(false); voiceBlobRef.current = null
+  }
+
+  // Ovoz yozishni bekor qilish
+  const cancelVoice = () => {
+    if (mediaRecorderRef.current) { try { mediaRecorderRef.current.stop() } catch {} }
+    if (chatVoiceTimerRef.current) clearInterval(chatVoiceTimerRef.current)
+    mediaRecorderRef.current?.stream?.getTracks().forEach((t: MediaStreamTrack)=>t.stop())
+    setIsVoiceRec(false); setVoiceSeconds(0); voiceBlobRef.current = null
+  }
+
+  const loadChatHistory = async (contact: TgContact|null, chat: TgChat|null) => {
+    setChatHistory([]); setChatHistoryLoad(true); setChatHistoryLoaded(false)
+    try {
+      const params = contact
+        ? `userId=${contact.id}${contact.username?`&username=${contact.username}`:''}`
+        : `chatId=${chat!.id}${chat!.username?`&username=${chat!.username}`:''}`
+      const d = await fetch(`/api/userbot/messages?${params}&limit=40`).then(r=>r.json())
+      if (d.ok) {
+        setChatHistory((d.messages||[]).reverse())
+        setTimeout(()=>chatHistoryEndRef.current?.scrollIntoView({behavior:'smooth'}),100)
+      }
+    } catch {}
+    setChatHistoryLoad(false); setChatHistoryLoaded(true)
+  }
+
   const sendContactMsg = async () => {
-    if (!selContact || !contactMsg.trim()) return
+    const target = selContact || selChat
+    if (!target || !contactMsg.trim()) return
     setSendingMsg(true)
     try {
+      const payload = selContact
+        ? { userId: selContact.id, username: selContact.username||undefined, message: contactMsg }
+        : { chatId: selChat!.id, username: selChat!.username||undefined, message: contactMsg }
       const d = await fetch('/api/userbot/messages', { method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ userId: selContact.id, username: selContact.username||undefined, message: contactMsg }) }).then(r=>r.json())
-      if (d.ok) { setContactMsg(''); setSelContact(null) }
-      else setContactsError(d.error||'Yuborib bo\'lmadi')
+        body: JSON.stringify(payload) }).then(r=>r.json())
+      if (d.ok) {
+        setContactMsg('')
+        // Yuborilgan xabarni darhol history ga qo'sh
+        const now = new Date().toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})
+        setChatHistory(p=>[...p,{id:Date.now(),text:contactMsg,date:now,out:true,from:null}])
+        setTimeout(()=>chatHistoryEndRef.current?.scrollIntoView({behavior:'smooth'}),80)
+      }
+      else {
+        const err = d.error || 'Yuborib bo\'lmadi'
+        if (err.includes('PEER_FLOOD')) {
+          setContactsError('⚠️ Telegram spam himoyasi: bu kontaktga hozircha xabar yubora olmaysiz. Bir necha soat kuting yoki avval oddiy Telegramdan xabar yuboring.')
+        } else if (err.includes('USER_PRIVACY_RESTRICTED')) {
+          setContactsError('🔒 Bu foydalanuvchi xabarlarni qabul qilishni cheklagan.')
+        } else {
+          setContactsError(err)
+        }
+      }
     } catch { setContactsError('Xato') }
     setSendingMsg(false)
   }
@@ -314,6 +475,11 @@ export default function Home() {
     return !q || c.name.toLowerCase().includes(q) || c.username.toLowerCase().includes(q) || c.phone.includes(q)
   })
 
+  const filteredChats = chats.filter(c => {
+    const q = contactsSearch.toLowerCase()
+    return !q || c.title.toLowerCase().includes(q) || c.username.toLowerCase().includes(q)
+  })
+
   // ── Gmail panel ──────────────────────────────────────────────────────────
   type GMsg = {id:string;subject:string;fromName:string;date:string;snippet:string;unread:boolean}
   type GMsgFull = GMsg & {body:string;html:string}
@@ -325,17 +491,37 @@ export default function Home() {
   const [gmailSetup,   setGmailSetup]   = useState(false)
 
   // ── Notion panel ──────────────────────────────────────────────────────────
+  // ── Notion types ──────────────────────────────────────────────────────────
+  type NSeg = {text:string; bold?:boolean; italic?:boolean; strikethrough?:boolean; underline?:boolean; code?:boolean; color?:string; href?:string}
+  type DBCell  = {text:string; color?:string; kind:string}
+  type DBRow   = {id:string; icon?:string; title:string; url:string; cells:Record<string,DBCell>}
+  type DBCol   = {name:string; type:string}
+  type NBlock = {
+    type:string; text:string; segments:NSeg[];
+    checked?:boolean; id:string; url?:string;
+    icon?:string; color?:string; src?:string;
+    rows?:string[][]; hasColumnHeader?:boolean;
+    children?: NBlock[]
+    dbColumns?: DBCol[]
+    dbRows?:    DBRow[]
+  }
+  type NPage = {id:string; title:string; url:string; emoji?:string|null}
+
   const [notionOpen,   setNotionOpen]   = useState(false)
-  const [notionPages,  setNotionPages]  = useState<{id:string;title:string;url:string;type:string;emoji?:string|null}[]>([])
-  const [notionPage,   setNotionPage]   = useState<{id:string;title:string;url:string;emoji?:string|null}|null>(null)
-  const [notionPageStack, setNotionPageStack] = useState<{id:string;title:string;url:string;emoji?:string|null}[]>([])
-  const [notionBlocks, setNotionBlocks] = useState<{type:string;text:string;checked?:boolean;id?:string;url?:string}[]>([])
+  const [notionPages,  setNotionPages]  = useState<{id:string;title:string;url:string;type:string;emoji?:string|null;last_edited?:string}[]>([])
+  const [notionPage,   setNotionPage]   = useState<NPage|null>(null)
+  const [notionCover,  setNotionCover]  = useState<string|null>(null)
+  const [notionPageStack, setNotionPageStack] = useState<NPage[]>([])
+  const [notionBlocks, setNotionBlocks] = useState<NBlock[]>([])
   const [notionProps,  setNotionProps]  = useState<{name:string;value:string;type:string}[]>([])
   const [notionLoading,setNotionLoading]= useState(false)
   const [notionAppend, setNotionAppend] = useState('')
   const [notionNewTitle,setNotionNewTitle]=useState('')
   const [notionCreating,setNotionCreating]=useState(false)
   const [notionSearchQ, setNotionSearchQ]=useState('')
+  const [notionWatchRunning, setNotionWatchRunning] = useState(false)
+  const [notionWatchResult, setNotionWatchResult]   = useState<string|null>(null)
+  const [openToggles, setOpenToggles]   = useState<Set<string>>(new Set())
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const webAppRef        = useRef<any>(null)
@@ -440,9 +626,9 @@ export default function Home() {
     setNotionLoading(false)
   }
 
-  const openNotionPage = async (pg: {id:string;title:string;url:string;emoji?:string|null}, pushStack=true) => {
+  const openNotionPage = async (pg: NPage, pushStack=true) => {
     if (pushStack && notionPage) setNotionPageStack(s => [...s, notionPage])
-    setNotionPage(pg); setNotionLoading(true); setNotionBlocks([]); setNotionProps([])
+    setNotionPage(pg); setNotionLoading(true); setNotionBlocks([]); setNotionProps([]); setNotionCover(null); setOpenToggles(new Set())
     try {
       const res = await fetch(`/api/notion?action=read_page&id=${pg.id}`)
       const d   = await res.json()
@@ -450,9 +636,23 @@ export default function Home() {
         setNotionBlocks(d.blocks || [])
         setNotionProps(d.props || [])
         if (d.emoji && !pg.emoji) setNotionPage(p => p ? {...p, emoji: d.emoji} : p)
+        if (d.coverUrl) setNotionCover(d.coverUrl)
       }
     } catch {}
     setNotionLoading(false)
+  }
+
+  const runNotionWatch = async () => {
+    setNotionWatchRunning(true)
+    setNotionWatchResult(null)
+    try {
+      const d = await fetch('/api/cron/notion-watch').then(r => r.json())
+      if (!d.ok) setNotionWatchResult(`⚠️ ${d.error || d.message}`)
+      else if (d.changes === 0) setNotionWatchResult('✅ O\'zgarish topilmadi')
+      else if (d.message) setNotionWatchResult(`✅ ${d.message}`)
+      else setNotionWatchResult(`🔔 ${d.changes} ta o'zgarish yuborildi!`)
+    } catch { setNotionWatchResult('⚠️ Ulanmadi') }
+    setNotionWatchRunning(false)
   }
 
   const notionGoBack = () => {
@@ -461,7 +661,7 @@ export default function Home() {
       setNotionPageStack(s => s.slice(0, -1))
       openNotionPage(prev, false)
     } else {
-      setNotionPage(null); setNotionBlocks([]); setNotionProps([])
+      setNotionPage(null); setNotionBlocks([]); setNotionProps([]); setNotionCover(null); setOpenToggles(new Set())
     }
   }
 
@@ -1237,16 +1437,34 @@ export default function Home() {
             <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-gray-800/60 shrink-0">
               <div>
                 <h2 className="text-base font-bold text-white flex items-center gap-2">
-                  👥 Telegram Kontaktlar
+                  💬 Telegram
                   {contactsUser && <span className="text-[10px] text-green-400 font-normal bg-green-500/10 px-2 py-0.5 rounded-full">● Ulangan</span>}
                 </h2>
                 {contactsUser && <p className="text-[11px] text-gray-500 mt-0.5">{contactsUser.name} {contactsUser.username?`@${contactsUser.username}`:''}</p>}
               </div>
               <div className="flex items-center gap-2">
-                {contactsStep==='done' && <button onClick={loadContacts} className="p-2 rounded-xl bg-[#1a1a1f] active:scale-90"><RefreshCw size={14} className="text-gray-400"/></button>}
+                {contactsStep==='done' && <button onClick={()=>{ loadContacts(); loadChats(true) }} className="p-2 rounded-xl bg-[#1a1a1f] active:scale-90"><RefreshCw size={14} className="text-gray-400"/></button>}
                 <button onClick={()=>setContactsOpen(false)} className="p-2 rounded-xl bg-[#1a1a1f] active:scale-90"><X size={14} className="text-gray-400"/></button>
               </div>
             </div>
+            {/* Tab switcher */}
+            {contactsStep==='done' && (
+              <div className="flex gap-1 px-4 pt-2 pb-1 shrink-0">
+                <button onClick={()=>setContactsTab('contacts')}
+                  className={`flex-1 py-2 rounded-xl text-xs font-semibold transition-all ${contactsTab==='contacts'?'bg-blue-600 text-white':'bg-[#1a1a1f] text-gray-400'}`}>
+                  👥 Kontaktlar {contacts.length>0 && <span className="opacity-60">({contacts.length})</span>}
+                </button>
+                <button onClick={()=>{ setContactsTab('chats'); if(chats.length < 10) loadChats(true) }}
+                  className={`flex-1 py-2 rounded-xl text-xs font-semibold transition-all ${contactsTab==='chats'?'bg-blue-600 text-white':'bg-[#1a1a1f] text-gray-400'}`}>
+                  💬 Chatlar {chats.length>0 && <span className="opacity-60">({chats.length})</span>}
+                </button>
+                {/* + Yangi kontakt */}
+                <button onClick={()=>{setAddContactOpen(true);setAddContactPhone('+998');setAddContactName('');setAddContactRes(null);setAddContactErr('')}}
+                  className="w-10 py-2 rounded-xl text-sm font-bold bg-[#1a1a1f] text-blue-400 active:scale-90">
+                  +
+                </button>
+              </div>
+            )}
 
             {/* Auth flow */}
             {contactsStep !== 'done' && (
@@ -1350,48 +1568,82 @@ export default function Home() {
               </div>
             )}
 
-            {/* Contacts list */}
+            {/* Contacts / Chats list */}
             {contactsStep === 'done' && (
               <div className="flex-1 flex flex-col overflow-hidden">
                 {/* Search */}
-                <div className="px-4 py-3 shrink-0">
+                <div className="px-4 py-2 shrink-0">
                   <div className="flex items-center gap-2 bg-[#1a1a1f] border border-gray-800 rounded-2xl px-3 py-2">
                     <Search size={14} className="text-gray-500 shrink-0"/>
                     <input value={contactsSearch} onChange={e=>setContactsSearch(e.target.value)}
-                      placeholder={`${contacts.length} kontaktdan qidiring...`}
+                      placeholder={contactsTab==='contacts'?`${contacts.length} kontaktdan qidiring...`:`${chats.length} chatdan qidiring...`}
                       className="flex-1 bg-transparent outline-none text-sm text-white" style={{fontSize:'16px'}} />
+                    {contactsSearch && <button onClick={()=>setContactsSearch('')}><X size={12} className="text-gray-500"/></button>}
                   </div>
                 </div>
 
-                {/* List */}
-                {contactsLoading ? (
-                  <div className="flex-1 flex items-center justify-center text-gray-400 text-sm animate-pulse">Kontaktlar yuklanmoqda...</div>
-                ) : (
-                  <div className="flex-1 overflow-y-auto px-4 pb-8">
-                    {filteredContacts.length === 0 && (
-                      <div className="text-center py-12 opacity-40">
-                        <p className="text-sm">Kontakt topilmadi</p>
-                      </div>
-                    )}
-                    {filteredContacts.map(c=>(
-                      <button key={c.id} onClick={()=>{setSelContact(c);setContactMsg('')}}
-                        className="w-full flex items-center gap-3 py-3 border-b border-gray-800/40 active:bg-white/5 rounded-xl px-1 transition-colors">
-                        {/* Avatar */}
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-600 to-purple-700 flex items-center justify-center shrink-0 text-base font-bold text-white">
-                          {c.name.charAt(0).toUpperCase() || '?'}
-                        </div>
-                        <div className="flex-1 text-left min-w-0">
-                          <p className="text-sm font-medium text-white truncate">{c.name || c.username || c.phone}</p>
-                          <p className="text-[11px] text-gray-500 truncate">
-                            {c.username ? `@${c.username}` : c.phone || ''}
-                            {c.online && <span className="text-green-400 ml-1">● online</span>}
-                            {!c.online && c.lastSeen && <span className="text-gray-600 ml-1">{c.lastSeen}</span>}
-                          </p>
-                        </div>
-                        <ChevronRight size={14} className="text-gray-600 shrink-0"/>
-                      </button>
-                    ))}
-                  </div>
+                {/* CONTACTS tab */}
+                {contactsTab === 'contacts' && (
+                  contactsLoading ? (
+                    <div className="flex-1 flex items-center justify-center text-gray-400 text-sm animate-pulse">Kontaktlar yuklanmoqda...</div>
+                  ) : (
+                    <div className="flex-1 overflow-y-auto px-4 pb-8">
+                      {filteredContacts.length === 0 && <div className="text-center py-12 opacity-40 text-sm">Kontakt topilmadi</div>}
+                      {filteredContacts.map(c=>(
+                        <button key={c.id} onClick={()=>{setSelContact(c);setSelChat(null);setContactMsg('');loadChatHistory(c,null)}}
+                          className="w-full flex items-center gap-3 py-3 border-b border-gray-800/40 active:bg-white/5 rounded-xl px-1 transition-colors">
+                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-600 to-purple-700 flex items-center justify-center shrink-0 text-base font-bold text-white">
+                            {c.name.charAt(0).toUpperCase() || '?'}
+                          </div>
+                          <div className="flex-1 text-left min-w-0">
+                            <p className="text-sm font-medium text-white truncate">{c.name || c.username || c.phone}</p>
+                            <p className="text-[11px] text-gray-500 truncate">
+                              {c.username ? `@${c.username}` : c.phone || ''}
+                              {c.online && <span className="text-green-400 ml-1">● online</span>}
+                              {!c.online && c.lastSeen && <span className="text-gray-600 ml-1">{c.lastSeen}</span>}
+                            </p>
+                          </div>
+                          <ChevronRight size={14} className="text-gray-600 shrink-0"/>
+                        </button>
+                      ))}
+                    </div>
+                  )
+                )}
+
+                {/* CHATS tab */}
+                {contactsTab === 'chats' && (
+                  chatsLoading ? (
+                    <div className="flex-1 flex items-center justify-center text-gray-400 text-sm animate-pulse">Chatlar yuklanmoqda...</div>
+                  ) : (
+                    <div className="flex-1 overflow-y-auto px-4 pb-8">
+                      {filteredChats.length === 0 && <div className="text-center py-12 opacity-40 text-sm">Chat topilmadi</div>}
+                      {filteredChats.map(c=>{
+                        const typeIcon = c.type==='channel'?'📢':c.type==='supergroup'||c.type==='group'?'👥':'💬'
+                        const gradFrom = c.type==='channel'?'from-pink-600 to-rose-700':c.type==='supergroup'||c.type==='group'?'from-green-600 to-teal-700':'from-indigo-600 to-blue-700'
+                        return (
+                          <button key={c.id} onClick={()=>{setSelChat(c);setSelContact(null);setContactMsg('');loadChatHistory(null,c)}}
+                            className="w-full flex items-center gap-3 py-3 border-b border-gray-800/40 active:bg-white/5 rounded-xl px-1 transition-colors">
+                            <div className={`w-10 h-10 rounded-full bg-gradient-to-br ${gradFrom} flex items-center justify-center shrink-0 text-base`}>
+                              {typeIcon}
+                            </div>
+                            <div className="flex-1 text-left min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <p className="text-sm font-medium text-white truncate flex-1">{c.title}</p>
+                                {c.unread>0 && <span className="text-[10px] bg-blue-500 text-white rounded-full px-1.5 py-0.5 shrink-0">{c.unread}</span>}
+                                {c.pinned && <span className="text-[10px] text-yellow-500 shrink-0">📌</span>}
+                              </div>
+                              <p className="text-[11px] text-gray-500 truncate">
+                                {c.username ? `@${c.username} · ` : ''}
+                                {c.membersCount ? `${c.membersCount.toLocaleString()} a'zo · ` : ''}
+                                {c.lastMsg || c.lastDate}
+                              </p>
+                            </div>
+                            <ChevronRight size={14} className="text-gray-600 shrink-0"/>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )
                 )}
               </div>
             )}
@@ -1399,60 +1651,214 @@ export default function Home() {
         </div>
       )}
 
-      {/* Contact detail drawer */}
-      {selContact && (
-        <div className="fixed inset-0 z-[60] bg-black/70 flex items-end backdrop-blur-sm" onClick={()=>setSelContact(null)}>
-          <div className="w-full bg-[#111114] border-t border-gray-800 rounded-t-3xl p-5 pb-8" onClick={e=>e.stopPropagation()}>
-            <div className="w-10 h-1 bg-gray-700 rounded-full mx-auto mb-4" />
-            {/* Contact info */}
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-600 to-purple-700 flex items-center justify-center text-xl font-bold text-white">
+      {/* Contact / Chat — to'liq chat oynasi */}
+      {(selContact || selChat) && (
+        <div className="fixed inset-0 z-[60] bg-[#0c0c0f] flex flex-col">
+          {/* Header */}
+          <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-800/60 shrink-0"
+               style={{paddingTop:'calc(0.75rem + env(safe-area-inset-top,0px))'}}>
+            <button onClick={()=>{setSelContact(null);setSelChat(null);setChatHistory([]);setChatHistoryLoaded(false)}}
+              className="w-9 h-9 rounded-xl bg-[#1a1a1f] flex items-center justify-center active:scale-90 shrink-0">
+              <span className="text-sm">←</span>
+            </button>
+            {selContact && (
+              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-600 to-purple-700 flex items-center justify-center text-sm font-bold text-white shrink-0">
                 {selContact.name.charAt(0).toUpperCase()}
               </div>
+            )}
+            {selChat && (
+              <div className={`w-9 h-9 rounded-full flex items-center justify-center text-lg bg-gradient-to-br shrink-0 ${selChat.type==='channel'?'from-pink-600 to-rose-700':selChat.type==='group'||selChat.type==='supergroup'?'from-green-600 to-teal-700':'from-indigo-600 to-blue-700'}`}>
+                {selChat.type==='channel'?'📢':selChat.type==='group'||selChat.type==='supergroup'?'👥':'💬'}
+              </div>
+            )}
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-white truncate">{selContact?.name || selChat?.title}</p>
+              <p className="text-[11px] text-gray-500 truncate">
+                {selContact ? (selContact.username?`@${selContact.username}`:selContact.phone||'online') : ''}
+                {selChat ? (selChat.membersCount?`${selChat.membersCount.toLocaleString()} a\'zo`:(selChat.username?`@${selChat.username}`:'')) : ''}
+              </p>
+            </div>
+            <button onClick={()=>loadChatHistory(selContact,selChat)}
+              className="w-9 h-9 rounded-xl bg-[#1a1a1f] flex items-center justify-center active:scale-90 shrink-0">
+              <RefreshCw size={13} className={`text-gray-400 ${chatHistoryLoad?'animate-spin':''}`}/>
+            </button>
+          </div>
+
+          {/* Quick templates — compact */}
+          <div className="flex gap-1.5 px-3 py-2 overflow-x-auto shrink-0" style={{scrollbarWidth:'none'}}>
+            {selContact && [
+              { label:'💸 Qarz', msg:`Salom ${selContact.firstName||selContact.name}! Qarzni to'lashni eslatmoqchiman 🙏` },
+              { label:'✅ OK', msg:'Yaxshi, kelishib oldik!' },
+              { label:'⏰ Keyin', msg:'Hozir band, keyinroq javob beraman.' },
+              { label:'📞 Qo\'ng\'iroq', msg:'Bir daqiqang bormi, qo\'ng\'iroq qilsam?' },
+            ].map(q=>(
+              <button key={q.label} onClick={()=>setContactMsg(q.msg)}
+                className="shrink-0 px-3 py-1.5 bg-[#1a1a1f] border border-gray-800/40 rounded-full text-[11px] text-gray-300 active:scale-95">
+                {q.label}
+              </button>
+            ))}
+            {selChat && selChat.type !== 'private' && [
+              { label:"📢 E'lon", msg:`📢 E'lon:\n\n` },
+              { label:'📅 Jadval', msg:`Bugungi jadval:\n\n` },
+              { label:'✅ Eslatma', msg:`⚡ Eslatma:\n\n` },
+              { label:'🔔 Muhim', msg:`‼️ Muhim xabar:\n\n` },
+            ].map(q=>(
+              <button key={q.label} onClick={()=>setContactMsg(q.msg)}
+                className="shrink-0 px-3 py-1.5 bg-[#1a1a1f] border border-gray-800/40 rounded-full text-[11px] text-gray-300 active:scale-95">
+                {q.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Xabarlar tarixi */}
+          <div className="flex-1 overflow-y-auto px-3 py-2 space-y-1">
+            {chatHistoryLoad && (
+              <div className="flex justify-center py-8">
+                <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"/>
+              </div>
+            )}
+            {!chatHistoryLoad && chatHistory.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-12 gap-2">
+                <span className="text-3xl opacity-30">💬</span>
+                <p className="text-xs text-gray-600">
+                  {chatHistoryLoaded ? 'Hali xabar yo\'q — birinchi bo\'ling!' : 'Yuklanmoqda...'}
+                </p>
+              </div>
+            )}
+            {chatHistory.map((msg, i) => (
+              <div key={msg.id || i} className={`flex ${msg.out?'justify-end':'justify-start'}`}>
+                <div className={`max-w-[75%] px-3 py-2 rounded-2xl ${msg.out
+                  ? 'bg-blue-600 rounded-br-sm text-white'
+                  : 'bg-[#1e1e24] border border-gray-800/40 rounded-bl-sm text-gray-100'
+                }`}>
+                  {msg.text ? (
+                    <p className="text-[13px] leading-relaxed whitespace-pre-wrap break-words">{msg.text}</p>
+                  ) : (
+                    <p className="text-[12px] text-gray-500 italic">📎 Media</p>
+                  )}
+                  <p className={`text-[9px] mt-1 text-right ${msg.out?'text-blue-200':'text-gray-600'}`}>{msg.date}</p>
+                </div>
+              </div>
+            ))}
+            {/* Bog'liq qarz eslatma */}
+            {selContact && debts.filter(d=>!d.paid&&d.person.toLowerCase().includes(selContact.name.toLowerCase().slice(0,4))).length>0 && (
+              <div className="flex justify-center py-1">
+                <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl px-3 py-1.5 text-[11px] text-yellow-400">
+                  🤝 {debts.filter(d=>!d.paid&&d.person.toLowerCase().includes(selContact.name.toLowerCase().slice(0,4)))[0].dir==='gave'?'📤 Berdim':'📥 Oldim'}: {fmtMoney(debts.filter(d=>!d.paid&&d.person.toLowerCase().includes(selContact.name.toLowerCase().slice(0,4)))[0].amount)} so&apos;m
+                </div>
+              </div>
+            )}
+            <div ref={chatHistoryEndRef}/>
+          </div>
+
+          {/* Xabar yozish */}
+          {contactsError && <p className="text-red-400 text-xs px-4 pb-1">{contactsError}</p>}
+
+          {/* Ovoz yozish holati */}
+          {isVoiceRec ? (
+            <div className="flex items-center gap-3 px-4 py-3 border-t border-gray-800/60 bg-red-500/5 shrink-0"
+                 style={{paddingBottom:'calc(0.75rem + env(safe-area-inset-bottom,0px))'}}>
+              <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"/>
+              <span className="text-sm text-red-400 font-mono flex-1">
+                {String(Math.floor(voiceSeconds/60)).padStart(2,'0')}:{String(voiceSeconds%60).padStart(2,'0')} yozilmoqda...
+              </span>
+              <button onClick={cancelVoice} className="px-3 py-2 bg-[#1a1a1f] rounded-xl text-xs text-gray-400 active:scale-90">
+                ✕ Bekor
+              </button>
+              <button onClick={stopAndSendVoice}
+                className="px-4 py-2 bg-blue-600 rounded-xl text-xs font-bold text-white active:scale-90 flex items-center gap-1">
+                <Send size={13}/> Yuborish
+              </button>
+            </div>
+          ) : (
+            <div className="flex gap-2 px-3 py-2 border-t border-gray-800/60 shrink-0"
+                 style={{paddingBottom:'calc(0.5rem + env(safe-area-inset-bottom,0px))'}}>
+              {/* Ovoz tugmasi */}
+              <button onPointerDown={startVoiceRecord}
+                className="w-11 h-11 self-end bg-[#1a1a1f] border border-gray-700 rounded-2xl flex items-center justify-center active:scale-90 shrink-0 active:bg-red-500/20 active:border-red-500/40">
+                <span className="text-lg">🎤</span>
+              </button>
+              <textarea value={contactMsg} onChange={e=>setContactMsg(e.target.value)}
+                onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendContactMsg()}}}
+                placeholder={selChat?.type==='channel'?'Kanal posti...':'Xabar yozing...'} rows={1}
+                className="flex-1 bg-[#1a1a1f] border border-gray-700 rounded-2xl px-4 py-3 text-sm outline-none resize-none focus:border-blue-500 transition-colors"
+                style={{fontSize:'15px',maxHeight:'120px'}} />
+              <button onClick={sendContactMsg} disabled={sendingMsg||!contactMsg.trim()}
+                className="w-11 h-11 self-end bg-blue-600 rounded-2xl flex items-center justify-center active:scale-90 disabled:opacity-40 shrink-0">
+                {sendingMsg ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/> : <Send size={16} className="text-white"/>}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Kontakt qo'shish modal ── */}
+      {addContactOpen && (
+        <div className="fixed inset-0 z-[70] bg-black/80 flex items-end backdrop-blur-sm" onClick={()=>setAddContactOpen(false)}>
+          <div className="w-full bg-[#111114] border-t border-gray-800 rounded-t-3xl p-5 pb-10" onClick={e=>e.stopPropagation()}>
+            <div className="w-10 h-1 bg-gray-700 rounded-full mx-auto mb-5"/>
+            <h3 className="text-base font-bold text-white mb-1">➕ Yangi kontakt</h3>
+            <p className="text-[12px] text-gray-500 mb-5">Telefon raqami kiriting — Telegramga qo'shiladi</p>
+
+            <div className="space-y-3 mb-4">
               <div>
-                <p className="text-base font-bold text-white">{selContact.name}</p>
-                <p className="text-xs text-gray-400">{selContact.username?`@${selContact.username}`:selContact.phone||''}</p>
+                <p className="text-[11px] text-gray-500 mb-1.5">Telefon raqami *</p>
+                <input
+                  value={addContactPhone}
+                  onChange={e=>setAddContactPhone(e.target.value)}
+                  onKeyDown={e=>e.key==='Enter'&&importContact()}
+                  placeholder="+998901234567"
+                  className="w-full bg-[#1a1a1f] border border-gray-700 rounded-2xl px-4 py-3.5 text-lg font-mono outline-none focus:border-blue-500 transition-colors"
+                  style={{fontSize:'18px'}} inputMode="tel" autoFocus
+                />
+              </div>
+              <div>
+                <p className="text-[11px] text-gray-500 mb-1.5">Ismi (ixtiyoriy)</p>
+                <input
+                  value={addContactName}
+                  onChange={e=>setAddContactName(e.target.value)}
+                  placeholder="Ism Familiya"
+                  className="w-full bg-[#1a1a1f] border border-gray-700 rounded-2xl px-4 py-3 text-sm outline-none focus:border-blue-500 transition-colors"
+                  style={{fontSize:'15px'}}
+                />
               </div>
             </div>
 
-            {/* Quick actions */}
-            <div className="grid grid-cols-3 gap-2 mb-4">
-              {[
-                { label:'💸 Qarz eslatma', msg:`Salom ${selContact.firstName||selContact.name}! Sizda menga qarz bor. Qulay vaqtda to'lashni so'rayman 🙏` },
-                { label:'✅ Tasdiqlash', msg:`Salom! Qarzimiz hisob-kitobini tekshirmoqchi edim.` },
-                { label:'📊 Hisobot', msg:`Salom ${selContact.firstName||selContact.name}! Moliyaviy holatimizni ko'rib chiqaylik.` },
-              ].map(q=>(
-                <button key={q.label} onClick={()=>setContactMsg(q.msg)}
-                  className="bg-[#1a1a1f] border border-gray-800/60 rounded-2xl px-2 py-2.5 text-[11px] text-gray-300 active:scale-95 text-center">
-                  {q.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Debt link */}
-            {debts.filter(d=>!d.paid && d.person.toLowerCase().includes(selContact.name.toLowerCase().slice(0,4))).length > 0 && (
-              <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-2xl px-4 py-3 mb-4">
-                <p className="text-xs text-yellow-400 font-bold mb-1">🤝 Bog'liq qarzlar:</p>
-                {debts.filter(d=>!d.paid && d.person.toLowerCase().includes(selContact.name.toLowerCase().slice(0,4))).slice(0,2).map(d=>(
-                  <p key={d.id} className="text-xs text-gray-300">
-                    {d.dir==='gave'?'📤 Berdim':'📥 Oldim'}: <b>{fmtMoney(d.amount)} so'm</b> — {d.person}
-                  </p>
-                ))}
+            {addContactErr && (
+              <div className="bg-red-500/10 border border-red-500/20 rounded-2xl px-4 py-3 mb-3">
+                <p className="text-xs text-red-400">⚠️ {addContactErr}</p>
               </div>
             )}
 
-            {/* Message input */}
-            {contactsError && <p className="text-red-400 text-xs mb-2">{contactsError}</p>}
-            <div className="flex gap-2">
-              <textarea value={contactMsg} onChange={e=>setContactMsg(e.target.value)}
-                placeholder="Xabar matni..." rows={2}
-                className="flex-1 bg-[#1a1a1f] border border-gray-700 rounded-2xl px-4 py-3 text-sm outline-none resize-none"
-                style={{fontSize:'15px'}} />
-              <button onClick={sendContactMsg} disabled={sendingMsg||!contactMsg.trim()}
-                className="w-12 bg-blue-600 rounded-2xl flex items-center justify-center active:scale-90 disabled:opacity-40">
-                <Send size={16} className="text-white"/>
+            {/* Qo'shildi natija */}
+            {addContactRes && (
+              <div className="bg-green-500/10 border border-green-500/20 rounded-2xl p-4 mb-3">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-green-600 to-teal-700 flex items-center justify-center text-xl font-bold text-white">
+                    {addContactRes.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold text-white">✅ {addContactRes.name}</p>
+                    <p className="text-[11px] text-green-400">Telegramga qo'shildi!</p>
+                    {addContactRes.username && <p className="text-[11px] text-gray-400">@{addContactRes.username}</p>}
+                  </div>
+                </div>
+                <button onClick={()=>openFoundContact(addContactRes!)}
+                  className="w-full py-3 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl text-sm font-bold active:scale-95">
+                  💬 Xabar yozish →
+                </button>
+              </div>
+            )}
+
+            {!addContactRes && (
+              <button onClick={importContact}
+                disabled={addContactLoad || addContactPhone.length < 8}
+                className="w-full py-4 bg-gradient-to-r from-blue-600 to-indigo-600 disabled:from-gray-700 disabled:to-gray-700 rounded-2xl text-sm font-bold active:scale-95 transition-all">
+                {addContactLoad
+                  ? <span className="flex items-center justify-center gap-2"><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/>Qo'shilmoqda...</span>
+                  : '➕ Kontakt qo\'shish'}
               </button>
-            </div>
+            )}
           </div>
         </div>
       )}
@@ -1501,7 +1907,7 @@ export default function Home() {
                 )}
                 <div>
                   <h3 className="text-base font-bold">
-                    {cardStep==='list'?'💳 Kartalarim':cardStep==='otp'?'🔐 SMS Tasdiqlash':'➕ Yangi karta'}
+                    {cardStep==='list'?'💳 Kartalarim':cardStep==='otp'?'🔐 SMS Tasdiqlash':cardStep==='shortcut'?'📱 iOS Shortcut':'➕ Yangi karta'}
                   </h3>
                   <p className="text-[10px] text-gray-500">{cards.length} ta karta ulangan</p>
                 </div>
@@ -1518,7 +1924,7 @@ export default function Home() {
                     <p className="text-gray-500 text-sm">Yuklanmoqda...</p>
                   </div>
                 ) : cards.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-16 px-8 gap-4">
+                  <div className="flex flex-col items-center justify-center py-12 px-8 gap-4">
                     <div className="w-20 h-14 bg-gradient-to-br from-gray-700 to-gray-800 rounded-2xl flex items-center justify-center text-3xl">💳</div>
                     <p className="text-gray-400 text-sm font-medium">Hali karta qo'shilmagan</p>
                     <p className="text-gray-600 text-xs text-center">Uzcard, Humo, Visa va boshqa kartalarni qo'shing</p>
@@ -1526,30 +1932,38 @@ export default function Home() {
                 ) : (
                   <>
                     {/* Card carousel */}
-                    <div className="px-5 mb-4">
+                    <div className="px-5 mb-3">
                       {/* Big card display */}
-                      <div className={`relative bg-gradient-to-br ${getCardGradient(cards[cardActiveIdx]||cards[0])} rounded-3xl p-6 overflow-hidden shadow-2xl`} style={{aspectRatio:'1.6/1'}}>
+                      <div className={`relative bg-gradient-to-br ${getCardGradient(cards[cardActiveIdx]||cards[0])} rounded-3xl p-5 overflow-hidden shadow-2xl`} style={{aspectRatio:'1.6/1'}}>
                         <div className="absolute -right-10 -top-10 w-40 h-40 bg-white/5 rounded-full"/>
                         <div className="absolute -right-4 bottom-4 w-24 h-24 bg-white/5 rounded-full"/>
                         <div className="absolute left-6 bottom-4 w-16 h-16 bg-black/10 rounded-full"/>
+                        {/* Balans (agar SMS dan kelgan bo'lsa) */}
+                        {(cards[cardActiveIdx]||cards[0]).balance != null && (
+                          <div className="absolute top-4 right-5 text-right">
+                            <p className="text-[9px] text-white/40 uppercase tracking-wider">Qoldiq</p>
+                            <p className="text-base font-bold text-white drop-shadow">{fmtMoney((cards[cardActiveIdx]||cards[0]).balance!)}</p>
+                            <p className="text-[8px] text-white/30">{(cards[cardActiveIdx]||cards[0]).lastBalanceDate||''}</p>
+                          </div>
+                        )}
                         {/* Chip */}
-                        <div className="w-10 h-7 bg-white/20 rounded-lg mb-5 flex items-center justify-center">
+                        <div className="w-10 h-7 bg-white/20 rounded-lg mb-4 flex items-center justify-center">
                           <div className="w-6 h-4 border border-white/30 rounded grid grid-cols-2 gap-px p-0.5">
                             <div className="bg-white/20 rounded-sm"/><div className="bg-white/20 rounded-sm"/>
                             <div className="bg-white/20 rounded-sm"/><div className="bg-white/20 rounded-sm"/>
                           </div>
                         </div>
-                        <p className="text-[15px] font-mono tracking-[0.18em] text-white mb-5 drop-shadow">
+                        <p className="text-[14px] font-mono tracking-[0.18em] text-white mb-4 drop-shadow">
                           **** **** **** {(cards[cardActiveIdx]||cards[0]).last4}
                         </p>
                         <div className="flex items-end justify-between">
                           <div>
                             <p className="text-[9px] text-white/40 uppercase tracking-wider mb-0.5">Karta egasi</p>
-                            <p className="text-sm text-white font-medium drop-shadow">{(cards[cardActiveIdx]||cards[0]).holder || '—'}</p>
+                            <p className="text-xs text-white font-medium drop-shadow">{(cards[cardActiveIdx]||cards[0]).holder || '—'}</p>
                           </div>
                           <div className="text-right">
                             <p className="text-[9px] text-white/40 uppercase tracking-wider mb-0.5">Muddat</p>
-                            <p className="text-sm text-white font-medium">{(cards[cardActiveIdx]||cards[0]).expiry}</p>
+                            <p className="text-xs text-white font-medium">{(cards[cardActiveIdx]||cards[0]).expiry}</p>
                           </div>
                           <div>
                             <p className="text-[10px] font-bold text-white/60 tracking-widest">
@@ -1576,20 +1990,61 @@ export default function Home() {
                       )}
                     </div>
 
+                    {/* Stats strip */}
+                    {cardStats[(cards[cardActiveIdx]||cards[0]).last4] && (
+                      <div className="grid grid-cols-2 gap-2 px-5 mb-3">
+                        <div className="bg-red-500/10 border border-red-500/20 rounded-2xl px-4 py-3">
+                          <p className="text-[9px] text-red-400 uppercase tracking-wider mb-0.5">Bu oy xarajat</p>
+                          <p className="text-sm font-bold text-red-300">{fmtMoney(cardStats[(cards[cardActiveIdx]||cards[0]).last4].monthSpent)}</p>
+                        </div>
+                        <div className="bg-green-500/10 border border-green-500/20 rounded-2xl px-4 py-3">
+                          <p className="text-[9px] text-green-400 uppercase tracking-wider mb-0.5">Bu oy kirim</p>
+                          <p className="text-sm font-bold text-green-300">{fmtMoney(cardStats[(cards[cardActiveIdx]||cards[0]).last4].monthIncome)}</p>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Quick actions */}
-                    <div className="grid grid-cols-3 gap-2 px-5 mb-4">
+                    <div className="grid grid-cols-4 gap-2 px-5 mb-3">
                       {[
-                        { icon:'💳', label:'Payme', action:()=>setInBrowserUrl('https://payme.uz') },
-                        { icon:'🔵', label:'Click',  action:()=>setInBrowserUrl('https://click.uz') },
-                        { icon:'🗑',  label:"O'chir", action:()=>deleteCard((cards[cardActiveIdx]||cards[0]).id) },
+                        { icon:'💳', label:'Payme',     action:()=>setInBrowserUrl('https://payme.uz') },
+                        { icon:'🔵', label:'Click',     action:()=>setInBrowserUrl('https://click.uz') },
+                        { icon:'📱', label:'iOS Setup', action:()=>setCardStep('shortcut') },
+                        { icon:'🗑', label:"O'chir",    action:()=>deleteCard((cards[cardActiveIdx]||cards[0]).id) },
                       ].map(a=>(
                         <button key={a.label} onClick={a.action}
                           className="flex flex-col items-center gap-1.5 py-3 bg-[#1a1a1f] border border-gray-800/60 rounded-2xl active:scale-95 transition-transform">
-                          <span className="text-xl">{a.icon}</span>
-                          <span className="text-[10px] text-gray-400">{a.label}</span>
+                          <span className="text-lg">{a.icon}</span>
+                          <span className="text-[9px] text-gray-400">{a.label}</span>
                         </button>
                       ))}
                     </div>
+
+                    {/* Recent transactions for active card */}
+                    {(() => {
+                      const actCard = cards[cardActiveIdx]||cards[0]
+                      const st = cardStats[actCard.last4]
+                      if (!st || st.txs.length === 0) return null
+                      return (
+                        <div className="px-5 mb-4">
+                          <p className="text-[10px] text-gray-500 uppercase tracking-wider font-bold mb-2">So'nggi tranzaksiyalar</p>
+                          <div className="space-y-1.5">
+                            {st.txs.slice(0,8).map(tx=>(
+                              <div key={tx.id} className="flex items-center gap-3 p-3 bg-[#1a1a1f] border border-gray-800/40 rounded-2xl">
+                                <span className="text-base">{tx.type==='DAROMAT'?'💚':'💸'}</span>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-xs text-white truncate">{tx.name}</p>
+                                  <p className="text-[10px] text-gray-600">{tx.date}</p>
+                                </div>
+                                <p className={`text-sm font-bold shrink-0 ${tx.type==='DAROMAT'?'text-green-400':'text-red-400'}`}>
+                                  {tx.type==='DAROMAT'?'+':'-'}{fmtMoney(tx.amount)}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )
+                    })()}
 
                     {/* All cards list */}
                     <div className="px-5 space-y-2 mb-4">
@@ -1601,8 +2056,9 @@ export default function Home() {
                             <p className="text-sm font-mono text-white">**** **** **** {c.last4}</p>
                             <p className="text-[10px] text-gray-500">{c.holder||c.brand?.toUpperCase()} · {c.expiry}</p>
                           </div>
-                          {c.verified ? <span className="text-[9px] text-green-400 bg-green-500/10 px-2 py-0.5 rounded-full">✓</span>
-                            : <span className="text-[9px] text-yellow-400 bg-yellow-500/10 px-2 py-0.5 rounded-full">⏳</span>}
+                          {c.balance != null && <span className="text-[10px] text-blue-400 font-mono shrink-0">{fmtMoney(c.balance)}</span>}
+                          {c.verified ? <span className="text-[9px] text-green-400 bg-green-500/10 px-2 py-0.5 rounded-full ml-1">✓</span>
+                            : <span className="text-[9px] text-yellow-400 bg-yellow-500/10 px-2 py-0.5 rounded-full ml-1">⏳</span>}
                         </button>
                       ))}
                     </div>
@@ -1610,17 +2066,82 @@ export default function Home() {
                 )}
 
                 {/* Add button */}
-                <div className="px-5">
+                <div className="px-5 space-y-2">
                   <button onClick={()=>{setCardStep('add');setCardError('');setCardForm({number:'',expiry:'',holder:''})}}
                     className="w-full py-4 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl text-sm font-bold active:scale-95 transition-transform shadow-lg shadow-blue-600/20">
                     ➕ Yangi karta qo'shish
                   </button>
-                  <div className="mt-3 flex items-center gap-2 justify-center">
+                  <button onClick={()=>setCardStep('shortcut')}
+                    className="w-full py-3 bg-[#1a1a1f] border border-gray-800/60 rounded-2xl text-sm font-medium text-gray-300 active:scale-95 transition-transform">
+                    📱 iOS Shortcut — SMS avtoimport
+                  </button>
+                  <div className="mt-2 flex items-center gap-2 justify-center">
                     <span className="text-lg">🔐</span>
-                    <p className="text-[11px] text-gray-600">To'liq raqam saqlanmaydi · Payme tokenizatsiyasi</p>
+                    <p className="text-[11px] text-gray-600">To'liq raqam saqlanmaydi · Xavfsiz</p>
                   </div>
                 </div>
               </>
+            )}
+
+            {/* ── iOS SHORTCUT SETUP ── */}
+            {cardStep === 'shortcut' && (
+              <div className="px-5 space-y-4">
+                <div className="bg-blue-500/10 border border-blue-500/20 rounded-3xl p-5">
+                  <p className="text-sm font-bold text-blue-300 mb-1">📱 iOS Shortcuts bilan avtomatik import</p>
+                  <p className="text-xs text-gray-400 leading-relaxed">Bank SMS kelganda Jarvis avtomatik xarajat sifatida yozadi. Balans ham yangilanadi.</p>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="bg-[#1a1a1f] border border-gray-800/60 rounded-2xl p-4">
+                    <p className="text-[10px] text-gray-500 uppercase tracking-wider font-bold mb-2">1. Webhook URL</p>
+                    <div className="bg-[#111114] rounded-xl px-3 py-2.5 flex items-center gap-2">
+                      <code className="text-[11px] text-green-400 flex-1 break-all">
+                        {typeof window !== 'undefined' ? window.location.origin : 'https://your-app.vercel.app'}/api/sms-import
+                      </code>
+                      <button
+                        onClick={()=>{
+                          const url = `${window.location.origin}/api/sms-import`
+                          navigator.clipboard.writeText(url).catch(()=>{})
+                        }}
+                        className="shrink-0 text-[10px] text-blue-400 bg-blue-500/10 px-2 py-1 rounded-lg active:scale-90">
+                        Nusxa
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="bg-[#1a1a1f] border border-gray-800/60 rounded-2xl p-4">
+                    <p className="text-[10px] text-gray-500 uppercase tracking-wider font-bold mb-3">2. Qadamlar</p>
+                    {[
+                      { n:'1', t:'iPhone Shortcuts ilovasini oching' },
+                      { n:'2', t:'Yangi Shortcut yarating (+)' },
+                      { n:'3', t:'"Automation" → "Message" → filtri: Bank nomi' },
+                      { n:'4', t:'"URL" ni yuqoridagi linkka o\'rnating' },
+                      { n:'5', t:'Method: POST, Body: {"text": "Shortcut Input"}' },
+                      { n:'6', t:'Saqlang — endi har SMS avtomatik keladi ✅' },
+                    ].map(s=>(
+                      <div key={s.n} className="flex gap-3 mb-2.5 last:mb-0">
+                        <span className="w-5 h-5 bg-blue-500/20 text-blue-400 rounded-full text-[10px] flex items-center justify-center shrink-0 font-bold mt-0.5">{s.n}</span>
+                        <p className="text-xs text-gray-300 leading-relaxed">{s.t}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="bg-[#1a1a1f] border border-gray-800/60 rounded-2xl p-4">
+                    <p className="text-[10px] text-gray-500 uppercase tracking-wider font-bold mb-2">3. Test qiling</p>
+                    <p className="text-xs text-gray-400 mb-3">Quyidagi bank SMS formatini yuborib ko'ring:</p>
+                    <div className="bg-[#111114] rounded-xl px-3 py-2.5">
+                      <code className="text-[10px] text-green-400 leading-relaxed">
+                        Uzcard *1234 dan 50000 so&apos;m sarflandi. Qoldiq: 1500000 so&apos;m
+                      </code>
+                    </div>
+                  </div>
+                </div>
+
+                <button onClick={()=>setCardStep('list')}
+                  className="w-full py-4 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl text-sm font-bold active:scale-95 transition-transform">
+                  ✅ Tushundim
+                </button>
+              </div>
             )}
 
             {/* ── ADD FORM ── */}
@@ -1684,7 +2205,7 @@ export default function Home() {
                       />
                     </div>
                     <div className="flex-1">
-                      <p className="text-[11px] text-gray-500 mb-1.5">Egasi</p>
+                      <p className="text-[11px] text-gray-500 mb-1.5">Egasi (ixtiyoriy)</p>
                       <input value={cardForm.holder}
                         onChange={e=>setCardForm(p=>({...p,holder:e.target.value.toUpperCase()}))}
                         placeholder="ISM FAMILIYA"
@@ -1917,24 +2438,325 @@ export default function Home() {
       )}
 
       {/* ══ NOTION PANEL ══ */}
-      {notionOpen && (
+      {notionOpen && (()=>{
+        // ── Color maps ────────────────────────────────────────────────────
+        const STATUS_COLORS: Record<string,{bg:string;color:string}> = {
+          'Done':{bg:'rgba(68,131,97,0.2)',color:'#4cc38a'},
+          'Completed':{bg:'rgba(68,131,97,0.2)',color:'#4cc38a'},
+          'In progress':{bg:'rgba(35,131,226,0.2)',color:'#529cca'},
+          'Not started':{bg:'rgba(120,120,120,0.15)',color:'#787774'},
+          'High':{bg:'rgba(212,76,71,0.2)',color:'#e03e3e'},
+          'Medium':{bg:'rgba(203,145,47,0.2)',color:'#dfab01'},
+          'Low':{bg:'rgba(120,120,120,0.15)',color:'#787774'},
+          'Planning':{bg:'rgba(144,101,176,0.2)',color:'#9065b0'},
+          'Faol':{bg:'rgba(35,131,226,0.2)',color:'#529cca'},
+          "To'langan":{bg:'rgba(68,131,97,0.2)',color:'#4cc38a'},
+          'Aktiv':{bg:'rgba(35,131,226,0.2)',color:'#529cca'},
+          'Tugatildi':{bg:'rgba(120,120,120,0.15)',color:'#787774'},
+        }
+        const CALLOUT_BG: Record<string,string> = {
+          gray_background:'rgba(241,241,239,0.07)', brown_background:'rgba(244,238,238,0.07)',
+          orange_background:'rgba(251,236,221,0.1)', yellow_background:'rgba(251,243,219,0.1)',
+          green_background:'rgba(237,243,236,0.1)', blue_background:'rgba(231,243,248,0.1)',
+          purple_background:'rgba(244,240,247,0.08)', pink_background:'rgba(249,238,243,0.08)',
+          red_background:'rgba(253,235,236,0.08)', default:'rgba(241,241,239,0.07)',
+        }
+        const NOTION_COLORS: Record<string,string> = {
+          red:'#e03e3e', orange:'#d9730d', yellow:'#dfab01', green:'#0f7b6c',
+          blue:'#0b6e99', purple:'#6940a5', pink:'#ad1a72', gray:'#9b9a97', brown:'#64473a',
+        }
+
+        // ── RichText renderer
+        const RichText = ({ segs, style }: { segs?: NSeg[]; style?: React.CSSProperties }) => {
+          if (!segs || segs.length===0) return null
+          return (
+            <span style={style}>
+              {segs.map((s, si) => {
+                let el: React.ReactNode = s.text
+                if (s.code) {
+                  el = <code key={si} style={{background:'rgba(135,131,120,0.15)',borderRadius:'3px',padding:'0.1em 0.3em',fontFamily:'monospace',fontSize:'85%',color:'#eb5757'}}>{el}</code>
+                } else {
+                  const st: React.CSSProperties = {}
+                  if (s.bold) st.fontWeight = '700'
+                  if (s.italic) st.fontStyle = 'italic'
+                  if (s.strikethrough) st.textDecoration = 'line-through'
+                  if (s.underline) st.textDecoration = 'underline'
+                  if (s.color) st.color = NOTION_COLORS[s.color] || s.color
+                  if (s.href) el = <a key={si} href={s.href} target="_blank" rel="noreferrer" style={{...st,color:'#529cca',textDecoration:'underline'}}>{el}</a>
+                  else if (Object.keys(st).length) el = <span key={si} style={st}>{el}</span>
+                }
+                return <React.Fragment key={si}>{el}</React.Fragment>
+              })}
+            </span>
+          )
+        }
+
+        // ── Single block renderer
+        const renderBlock = (b: NBlock, idx: number, nc: {n:number}): React.ReactNode => {
+          const txt = b.text
+          const segs = b.segments || []
+          const base: React.CSSProperties = {color:'#e9e9e7'}
+          const muted: React.CSSProperties = {color:'#9b9a97'}
+          const RT = () => <RichText segs={segs.length?segs:undefined}/>
+
+          if (b.type==='divider') return <div key={b.id||idx} style={{borderTop:'1px solid #2e2e2e',margin:'12px 0'}}/>
+
+          // ── Full Notion-style database table ────────────────────────────
+          if (b.type==='db_table' && b.dbColumns && b.dbRows) {
+            nc.n = 0
+            const cols = b.dbColumns
+            const rowsData = b.dbRows
+            const parseClr = (c?:string) => { if (!c) return null; const [bg,fg]=c.split('|'); return {bg,fg} }
+            return (
+              <div key={b.id||idx} className="my-3 rounded-xl overflow-hidden" style={{border:'1px solid #2e2e2e'}}>
+                {/* DB Header */}
+                <div className="flex items-center gap-2 px-3 py-2.5" style={{background:'#1e1e1e',borderBottom:'1px solid #2e2e2e'}}>
+                  <span className="text-[16px]">{b.icon||'🗃'}</span>
+                  <p className="text-[14px] font-semibold flex-1" style={{color:'#e9e9e7'}}>{txt}</p>
+                  <span className="text-[11px] px-1.5 py-0.5 rounded-md" style={{background:'#2e2e2e',color:'#787774'}}>{rowsData.length}</span>
+                  <button onClick={()=>b.id&&openNotionPage({id:b.id,title:txt,url:''})}
+                    className="ml-1 w-6 h-6 flex items-center justify-center rounded-md active:bg-white/10">
+                    <ExternalLink size={11} style={{color:'#787774'}}/>
+                  </button>
+                </div>
+                {/* Table */}
+                <div className="overflow-x-auto">
+                  <table style={{width:'100%',borderCollapse:'collapse',minWidth:`${Math.max(320,cols.length*120)}px`}}>
+                    <thead>
+                      <tr style={{background:'#181818'}}>
+                        {cols.map((col:{name:string;type:string}, ci:number) => (
+                          <th key={ci} className="text-left px-3 py-1.5" style={{
+                            color:'#555',borderBottom:'1px solid #2e2e2e',
+                            fontSize:'10px',fontWeight:'600',textTransform:'uppercase',letterSpacing:'0.06em',
+                            whiteSpace:'nowrap', width:col.type==='title'?'38%':undefined
+                          }}>{col.name}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rowsData.length===0 && (
+                        <tr><td colSpan={cols.length} className="px-3 py-4 text-center text-[12px]" style={{color:'#444'}}>Bo&apos;sh</td></tr>
+                      )}
+                      {rowsData.map((row:DBRow, ri:number) => (
+                        <tr key={row.id} onClick={()=>openNotionPage({id:row.id,title:row.title,url:row.url})}
+                          className="active:bg-white/5" style={{borderBottom:'1px solid #1e1e1e',cursor:'pointer'}}>
+                          {cols.map((col:{name:string;type:string}, ci:number) => {
+                            if (col.type==='title') return (
+                              <td key={ci} className="px-3 py-2">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[13px] shrink-0">{row.icon||'📄'}</span>
+                                  <span className="text-[13px] font-medium" style={{color:'#e9e9e7',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:'140px',display:'block'}}>{row.title||'Nomsiz'}</span>
+                                </div>
+                              </td>
+                            )
+                            const cell = row.cells[col.name]
+                            if (!cell?.text) return <td key={ci} className="px-3 py-2" style={{color:'#333',fontSize:'12px'}}>—</td>
+                            const clr = parseClr(cell.color)
+                            if (clr && ['status','select','multi_select'].includes(cell.kind)) return (
+                              <td key={ci} className="px-3 py-2">
+                                <span className="text-[11px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap"
+                                  style={{background:clr.bg,color:clr.fg}}>{cell.text}</span>
+                              </td>
+                            )
+                            return (
+                              <td key={ci} className="px-3 py-2" style={{color:'#787774',fontSize:'12px',maxWidth:'140px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{cell.text}</td>
+                            )
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )
+          }
+
+          // ── Fallback: old db_header / db_item ────────────────────────
+          if (b.type==='db_header') return (
+            <div key={b.id||idx} className="pt-5 pb-1.5">
+              <p className="text-xs font-semibold uppercase tracking-wider" style={{color:'#787774'}}>🗄 {txt}</p>
+            </div>
+          )
+
+          if (b.type==='db_item') {
+            nc.n = 0
+            const match = txt.match(/^(.*?)\s{2}\[(.+)\]$/)
+            const title = match ? match[1].trim() : txt
+            const status = match ? match[2] : ''
+            const sc = STATUS_COLORS[status] || {bg:'rgba(120,120,120,0.1)',color:'#9b9a97'}
+            return (
+              <button key={b.id||idx} onClick={()=>b.id&&openNotionPage({id:b.id,title,url:b.url||''})}
+                className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg active:bg-white/5 text-left"
+                style={{borderBottom:'1px solid #2e2e2e'}}>
+                <span className="text-[15px] shrink-0">{b.icon||'📄'}</span>
+                <p className="flex-1 text-[14px] truncate" style={base}>{title}</p>
+                {status && <span className="text-[11px] px-2 py-0.5 rounded-md shrink-0 font-medium" style={{background:sc.bg,color:sc.color}}>{status}</span>}
+                <ChevronRight size={12} style={{color:'#444'}}/>
+              </button>
+            )
+          }
+
+          if (b.type==='child_page'||b.type==='child_database') {
+            nc.n = 0
+            return (
+              <button key={b.id||idx} onClick={()=>b.id&&openNotionPage({id:b.id,title:txt,url:b.url||''})}
+                className="w-full flex items-center gap-2 py-1.5 rounded-lg active:bg-white/5 text-left">
+                <span className="text-[15px]">{b.type==='child_database'?'🗃':'📄'}</span>
+                <p className="text-[14px] flex-1" style={{color:'#2383e2'}}>{txt}</p>
+                <ChevronRight size={12} style={{color:'#2383e2',opacity:0.5}}/>
+              </button>
+            )
+          }
+
+          if (b.type==='heading_1') { nc.n=0; return <h2 key={b.id||idx} className="text-xl font-bold pt-5 pb-1.5 leading-snug" style={base}>{segs.length?<RT/>:txt}</h2> }
+          if (b.type==='heading_2') { nc.n=0; return <h3 key={b.id||idx} className="text-[16px] font-semibold pt-4 pb-1" style={base}>{segs.length?<RT/>:txt}</h3> }
+          if (b.type==='heading_3') { nc.n=0; return <h4 key={b.id||idx} className="text-[13px] font-semibold pt-3 pb-0.5 uppercase tracking-wide" style={{color:'#787774'}}>{segs.length?<RT/>:txt}</h4> }
+
+          if (b.type==='bulleted_list_item') {
+            nc.n = 0
+            return (
+              <div key={b.id||idx} className="flex gap-2 py-0.5 items-start">
+                <span className="shrink-0 mt-[4px]" style={{color:'#787774',fontSize:'11px'}}>•</span>
+                <p className="text-[14px] leading-relaxed" style={base}>{segs.length?<RT/>:txt}</p>
+              </div>
+            )
+          }
+
+          if (b.type==='numbered_list_item') {
+            nc.n++
+            return (
+              <div key={b.id||idx} className="flex gap-2 py-0.5 items-start">
+                <span className="shrink-0 text-[13px] min-w-[18px] text-right" style={{color:'#787774'}}>{nc.n}.</span>
+                <p className="text-[14px] leading-relaxed" style={base}>{segs.length?<RT/>:txt}</p>
+              </div>
+            )
+          }
+
+          if (b.type==='to_do') {
+            nc.n = 0
+            return (
+              <div key={b.id||idx} className="flex gap-2.5 py-0.5 items-start">
+                <span className="shrink-0 mt-[1px] text-[15px]">{b.checked?'✅':'⬜'}</span>
+                <p className="text-[14px] leading-relaxed" style={b.checked?{color:'#787774',textDecoration:'line-through'}:base}>
+                  {segs.length?<RT/>:txt}
+                </p>
+              </div>
+            )
+          }
+
+          if (b.type==='quote') {
+            nc.n = 0
+            return (
+              <div key={b.id||idx} className="my-1" style={{borderLeft:'3px solid #787774',paddingLeft:'12px'}}>
+                <p className="text-[14px] italic leading-relaxed" style={muted}>{segs.length?<RT/>:txt}</p>
+              </div>
+            )
+          }
+
+          if (b.type==='callout') {
+            nc.n = 0
+            const bg = CALLOUT_BG[b.color||'default'] || CALLOUT_BG.default
+            return (
+              <div key={b.id||idx} className="flex gap-3 p-3 rounded-lg my-1" style={{background:bg,border:'1px solid rgba(255,255,255,0.06)'}}>
+                <span className="text-[18px] shrink-0 mt-0.5">{b.icon||'💡'}</span>
+                <p className="text-[14px] leading-relaxed" style={base}>{segs.length?<RT/>:txt}</p>
+              </div>
+            )
+          }
+
+          if (b.type==='code') {
+            nc.n = 0
+            return (
+              <div key={b.id||idx} className="my-2 rounded-lg overflow-hidden" style={{background:'#1e1e1e'}}>
+                {b.color && <div className="px-3 py-1 text-[10px] font-mono" style={{background:'#2a2a2a',color:'#787774',borderBottom:'1px solid #333'}}>{b.color}</div>}
+                <pre className="p-3 text-[12px] overflow-x-auto leading-relaxed" style={{color:'#cdd9e5',fontFamily:'monospace'}}>{txt}</pre>
+              </div>
+            )
+          }
+
+          if (b.type==='image' && b.src) {
+            nc.n = 0
+            return (
+              <div key={b.id||idx} className="my-2">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={b.src} alt={txt||'image'} className="w-full rounded-lg" style={{maxHeight:'300px',objectFit:'cover'}}/>
+                {txt && <p className="text-[11px] text-center mt-1" style={{color:'#787774'}}>{txt}</p>}
+              </div>
+            )
+          }
+
+          if (b.type==='table' && b.rows) {
+            nc.n = 0
+            return (
+              <div key={b.id||idx} className="my-2 overflow-x-auto">
+                <table className="w-full text-[13px]" style={{borderCollapse:'collapse'}}>
+                  <tbody>
+                    {b.rows.map((row, ri) => (
+                      <tr key={ri} style={{borderBottom:'1px solid #2e2e2e',background:ri===0&&b.hasColumnHeader?'rgba(255,255,255,0.04)':undefined}}>
+                        {row.map((cell, ci) => (
+                          <td key={ci} className="px-2.5 py-1.5" style={{color:ri===0&&b.hasColumnHeader?'#e9e9e7':'#9b9a97',fontWeight:ri===0&&b.hasColumnHeader?'600':undefined,borderRight:'1px solid #2e2e2e'}}>{cell}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          }
+
+          if (b.type==='toggle') {
+            nc.n = 0
+            const isOpen = openToggles.has(b.id)
+            return (
+              <div key={b.id||idx} className="my-0.5">
+                <button onClick={()=>setOpenToggles(s=>{const n=new Set(s); isOpen?n.delete(b.id):n.add(b.id); return n})}
+                  className="w-full flex items-start gap-2 py-1 rounded-md active:bg-white/5 text-left">
+                  <span className="shrink-0 mt-[4px] text-[9px]" style={{color:'#787774',display:'inline-block',transform:isOpen?'rotate(90deg)':'rotate(0deg)',transition:'transform 0.15s'}}>▶</span>
+                  <p className="text-[14px] leading-relaxed flex-1 font-medium" style={base}>{segs.length?<RT/>:txt}</p>
+                </button>
+                {isOpen && b.children && b.children.length>0 && (
+                  <div className="ml-4 pl-3" style={{borderLeft:'1px solid #2e2e2e'}}>
+                    {(()=>{ const nc2={n:0}; return b.children!.map((ch,ci)=>renderBlock(ch,ci,nc2)) })()}
+                  </div>
+                )}
+              </div>
+            )
+          }
+
+          // Paragraph default
+          nc.n = 0
+          if (!txt && !segs.length) return null
+          return <p key={b.id||idx} className="text-[14px] py-0.5 leading-relaxed" style={muted}>{segs.length?<RT/>:txt}</p>
+        }
+
+        // ── Last edited formatter
+        const fmtDate = (iso?: string) => {
+          if (!iso) return ''
+          try {
+            const d = new Date(iso), now = new Date()
+            const h = (now.getTime()-d.getTime())/3600000
+            if (h<1) return 'hozirgina'
+            if (h<24) return `${Math.floor(h)}s oldin`
+            if (h<48) return 'kecha'
+            if (h<168) return `${Math.floor(h/24)} kun oldin`
+            return d.toLocaleDateString('uz-UZ',{day:'2-digit',month:'short'})
+          } catch { return '' }
+        }
+
+        return (
         <div className="fixed inset-0 z-[80] flex flex-col" style={{background:'#191919',paddingTop:'env(safe-area-inset-top,0px)'}}>
 
-          {/* ── Notion Header ── */}
+          {/* ── Header ── */}
           <div className="flex items-center gap-2 px-3 py-2.5 shrink-0" style={{borderBottom:'1px solid #2e2e2e'}}>
             <button onClick={()=>{ if(notionPage) notionGoBack(); else setNotionOpen(false) }}
               className="w-8 h-8 rounded-lg flex items-center justify-center active:bg-white/10">
               <X size={16} style={{color:'#787774'}}/>
             </button>
-            {/* Breadcrumb */}
             <div className="flex-1 flex items-center gap-1 min-w-0 overflow-hidden">
               {notionPageStack.map((p,i)=>(
                 <span key={i} className="flex items-center gap-1 shrink-0">
-                  <button onClick={()=>{
-                    const stack = notionPageStack.slice(0,i)
-                    setNotionPageStack(stack)
-                    openNotionPage(p, false)
-                  }} className="text-[12px] truncate max-w-[80px]" style={{color:'#787774'}}>{p.emoji||'📄'} {p.title}</button>
+                  <button onClick={()=>{ const stack=notionPageStack.slice(0,i); setNotionPageStack(stack); openNotionPage(p,false) }}
+                    className="text-[12px] truncate max-w-[80px]" style={{color:'#787774'}}>{p.emoji||'📄'} {p.title}</button>
                   <ChevronRight size={10} style={{color:'#444'}}/>
                 </span>
               ))}
@@ -1952,21 +2774,37 @@ export default function Home() {
           </div>
 
           <div className="flex-1 overflow-y-auto">
-            {/* ── Page list (Home) ── */}
+
+            {/* ══ PAGE LIST ══ */}
             {!notionPage && (
               <div>
-                {/* Search */}
-                <div className="px-4 pt-3 pb-2">
+                <div className="px-4 pt-3 pb-1">
+                  <div className="flex items-center gap-2 p-3 rounded-xl" style={{background:'rgba(35,131,226,0.08)',border:'1px solid rgba(35,131,226,0.2)'}}>
+                    <span className="text-sm">🔔</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[11px] font-medium" style={{color:'#2383e2'}}>Real-time kuzatuv</p>
+                      {notionWatchResult
+                        ? <p className="text-[10px]" style={{color:'#787774'}}>{notionWatchResult}</p>
+                        : <p className="text-[10px]" style={{color:'#787774'}}>Har 5 daqiqada avtomatik tekshiriladi</p>}
+                    </div>
+                    <button onClick={runNotionWatch} disabled={notionWatchRunning}
+                      className="shrink-0 px-3 py-1.5 rounded-lg text-[11px] font-medium disabled:opacity-40"
+                      style={{background:'rgba(35,131,226,0.2)',color:'#2383e2'}}>
+                      {notionWatchRunning ? '⏳' : '▶ Test'}
+                    </button>
+                  </div>
+                </div>
+                <div className="px-4 pt-2 pb-1">
                   <div className="flex items-center gap-2 px-3 py-2 rounded-lg" style={{background:'#2e2e2e'}}>
                     <Search size={13} style={{color:'#787774'}}/>
                     <input value={notionSearchQ} onChange={e=>setNotionSearchQ(e.target.value)}
                       placeholder="Sahifalarni qidiring..." className="flex-1 bg-transparent text-sm outline-none" style={{color:'#e9e9e7',fontSize:'14px'}}/>
+                    {notionSearchQ && <button onClick={()=>setNotionSearchQ('')} style={{color:'#787774',fontSize:'11px'}}>✕</button>}
                   </div>
                 </div>
-                {/* New page */}
-                <div className="px-4 pb-3 flex gap-2">
+                <div className="px-4 pt-1 pb-3 flex gap-2">
                   <input value={notionNewTitle} onChange={e=>setNotionNewTitle(e.target.value)}
-                    placeholder="Yangi sahifa..." onKeyDown={e=>e.key==='Enter'&&createNotionPage()}
+                    placeholder="+ Yangi sahifa nomi..." onKeyDown={e=>e.key==='Enter'&&createNotionPage()}
                     className="flex-1 px-3 py-2 rounded-lg text-sm outline-none" style={{background:'#2e2e2e',color:'#e9e9e7',fontSize:'14px'}}/>
                   <button onClick={createNotionPage} disabled={!notionNewTitle.trim()||notionCreating}
                     className="px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-1 disabled:opacity-40" style={{background:'#2383e2',color:'white'}}>
@@ -1975,7 +2813,6 @@ export default function Home() {
                 </div>
 
                 {notionLoading && <div className="flex justify-center py-10"><RefreshCw size={18} className="animate-spin" style={{color:'#787774'}}/></div>}
-
                 {!notionLoading && notionPages.length===0 && (
                   <div className="px-4 py-8 text-center space-y-3">
                     <div className="text-3xl">🔗</div>
@@ -1984,18 +2821,17 @@ export default function Home() {
                     <button onClick={loadNotionPages} className="px-4 py-2 rounded-lg text-sm" style={{background:'#2e2e2e',color:'#2383e2'}}>🔄 Qayta yuklash</button>
                   </div>
                 )}
-
-                {/* Page items — Notion style */}
                 {!notionLoading && filteredNotionPages.length>0 && (
                   <div className="px-2">
                     {filteredNotionPages.map(p => (
                       <button key={p.id} onClick={()=>openNotionPage(p)}
-                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg active:bg-white/5 text-left transition-colors">
-                        <span className="text-lg w-7 text-center shrink-0">
-                          {p.emoji || (p.type==='database'?'🗃':'📄')}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg active:bg-white/5 text-left">
+                        <span className="text-[18px] w-7 text-center shrink-0">
+                          {p.emoji||(p.type==='database'?'🗃':'📄')}
                         </span>
                         <div className="flex-1 min-w-0">
                           <p className="text-[14px] truncate" style={{color:'#e9e9e7'}}>{p.title}</p>
+                          {p.last_edited && <p className="text-[11px] mt-0.5" style={{color:'#555'}}>{fmtDate(p.last_edited)}</p>}
                         </div>
                         <ChevronRight size={13} style={{color:'#444'}}/>
                       </button>
@@ -2005,37 +2841,30 @@ export default function Home() {
               </div>
             )}
 
-            {/* ── Page content ── */}
+            {/* ══ PAGE CONTENT ══ */}
             {notionPage && (
               <div>
-                {/* Page title */}
-                <div className="px-5 pt-8 pb-3">
-                  {notionPage.emoji && <div className="text-5xl mb-3">{notionPage.emoji}</div>}
-                  <h1 className="text-2xl font-bold" style={{color:'#e9e9e7',lineHeight:'1.3'}}>{notionPage.title}</h1>
+                {notionCover && (
+                  <div className="w-full overflow-hidden" style={{height:'140px'}}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={notionCover} alt="cover" style={{width:'100%',height:'100%',objectFit:'cover'}}/>
+                  </div>
+                )}
+                <div className={`px-5 pb-4 ${notionCover?'pt-4':'pt-9'}`}>
+                  {notionPage.emoji && <div className={`text-5xl ${notionCover?'-mt-8 mb-3':'mb-3'}`}>{notionPage.emoji}</div>}
+                  <h1 className="text-[26px] font-bold leading-tight" style={{color:'#e9e9e7'}}>{notionPage.title}</h1>
                 </div>
-                {/* Properties */}
+
                 {notionProps.length > 0 && (
-                  <div className="px-5 pb-4 space-y-2" style={{borderBottom:'1px solid #2e2e2e'}}>
+                  <div className="px-5 pb-4 space-y-2.5" style={{borderBottom:'1px solid #2e2e2e'}}>
                     {notionProps.map((p,i)=>{
-                      const statusColors: Record<string,{bg:string;color:string}> = {
-                        'Done':{bg:'rgba(68,131,97,0.2)',color:'#4cc38a'},
-                        'In progress':{bg:'rgba(35,131,226,0.2)',color:'#529cca'},
-                        'Not started':{bg:'rgba(120,120,120,0.15)',color:'#787774'},
-                        'High':{bg:'rgba(212,76,71,0.2)',color:'#e03e3e'},
-                        'Medium':{bg:'rgba(203,145,47,0.2)',color:'#dfab01'},
-                        'Low':{bg:'rgba(120,120,120,0.15)',color:'#787774'},
-                        'Planning':{bg:'rgba(144,101,176,0.2)',color:'#9065b0'},
-                        'Completed':{bg:'rgba(68,131,97,0.2)',color:'#4cc38a'},
-                      }
-                      const sc = statusColors[p.value]
+                      const sc = STATUS_COLORS[p.value]
                       return (
-                        <div key={i} className="flex items-center gap-3">
-                          <span className="text-[12px] w-24 shrink-0" style={{color:'#787774'}}>{p.name}</span>
-                          {sc ? (
-                            <span className="text-[12px] px-2 py-0.5 rounded-md font-medium" style={{background:sc.bg,color:sc.color}}>{p.value}</span>
-                          ) : (
-                            <span className="text-[13px]" style={{color:'#e9e9e7'}}>{p.value}</span>
-                          )}
+                        <div key={i} className="flex items-start gap-3">
+                          <span className="text-[12px] w-28 shrink-0 pt-0.5" style={{color:'#787774'}}>{p.name}</span>
+                          {sc
+                            ? <span className="text-[12px] px-2 py-0.5 rounded-md font-medium" style={{background:sc.bg,color:sc.color}}>{p.value}</span>
+                            : <span className="text-[13px] leading-relaxed" style={{color:'#e9e9e7'}}>{p.value}</span>}
                         </div>
                       )
                     })}
@@ -2044,60 +2873,13 @@ export default function Home() {
 
                 {notionLoading && <div className="flex justify-center py-10"><RefreshCw size={18} className="animate-spin" style={{color:'#787774'}}/></div>}
                 {!notionLoading && notionBlocks.length===0 && (
-                  <p className="px-5 text-sm" style={{color:'#787774'}}>Sahifa bo&apos;sh — pastdan matn qo&apos;shing</p>
+                  <p className="px-5 py-4 text-[13px]" style={{color:'#555'}}>Sahifa bo&apos;sh — pastdan matn qo&apos;shing</p>
                 )}
-
-                <div className="px-5 space-y-1 pb-4">
-                {!notionLoading && notionBlocks.map((b,i) => {
-                  if (b.type==='db_item') {
-                    const match = b.text.match(/^(.*?)\s+\[(.+)\]$/)
-                    const title = match ? match[1].trim() : b.text
-                    const status = match ? match[2] : ''
-                    const sc: Record<string,{bg:string;color:string}> = {
-                      'Done':{bg:'rgba(68,131,97,0.15)',color:'#4cc38a'},
-                      'In progress':{bg:'rgba(35,131,226,0.15)',color:'#529cca'},
-                      'Not started':{bg:'rgba(120,120,120,0.15)',color:'#787774'},
-                      'High':{bg:'rgba(212,76,71,0.15)',color:'#e03e3e'},
-                      'Medium':{bg:'rgba(203,145,47,0.15)',color:'#dfab01'},
-                      'Low':{bg:'rgba(120,120,120,0.15)',color:'#787774'},
-                      'Planning':{bg:'rgba(144,101,176,0.15)',color:'#9065b0'},
-                      'Completed':{bg:'rgba(68,131,97,0.15)',color:'#4cc38a'},
-                    }
-                    const s = sc[status]||{bg:'rgba(120,120,120,0.1)',color:'#787774'}
-                    return (
-                      <button key={i} onClick={()=>b.id&&openNotionPage({id:b.id,title,url:b.url||''})}
-                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg active:bg-white/5 text-left"
-                        style={{borderBottom:'1px solid #2e2e2e'}}>
-                        <span className="text-sm shrink-0" style={{color:'#444'}}>📄</span>
-                        <p className="flex-1 text-[14px] truncate" style={{color:'#e9e9e7'}}>{title}</p>
-                        {status && <span className="text-[11px] px-2 py-0.5 rounded-md shrink-0 font-medium" style={{background:s.bg,color:s.color}}>{status}</span>}
-                        <ChevronRight size={12} style={{color:'#444'}}/>
-                      </button>
-                    )
-                  }
-                  // Section header (db title)
-                  if (b.type==='heading_3') return (
-                    <div key={i} className="pt-5 pb-1">
-                      <p className="text-xs font-semibold uppercase tracking-wider" style={{color:'#787774'}}>{b.text.replace(/^🗄 /,'')}</p>
-                    </div>
-                  )
-                  if (b.type==='heading_1') return <p key={i} className="text-xl font-bold pt-4 pb-1" style={{color:'#e9e9e7'}}>{b.text}</p>
-                  if (b.type==='heading_2') return <p key={i} className="text-base font-bold pt-3 pb-1" style={{color:'#e9e9e7'}}>{b.text}</p>
-                  if (b.type==='bulleted_list_item') return <div key={i} className="flex gap-2 py-0.5"><span style={{color:'#787774'}}>•</span><p className="text-[14px]" style={{color:'#e9e9e7'}}>{b.text}</p></div>
-                  if (b.type==='numbered_list_item') return <div key={i} className="flex gap-2 py-0.5"><span style={{color:'#787774'}}>{i+1}.</span><p className="text-[14px]" style={{color:'#e9e9e7'}}>{b.text}</p></div>
-                  if (b.type==='to_do') return <div key={i} className="flex gap-2 py-0.5 items-start"><span>{b.checked?'☑️':'⬜'}</span><p className="text-[14px]" style={{color:b.checked?'#787774':'#e9e9e7'}}>{b.text}</p></div>
-                  if (b.type==='quote') return <div key={i} className="py-1" style={{borderLeft:'3px solid #787774',paddingLeft:'12px'}}><p className="text-[14px] italic" style={{color:'#9b9a97'}}>{b.text}</p></div>
-                  if (b.type==='code') return <pre key={i} className="p-3 rounded-lg text-xs overflow-x-auto" style={{background:'#2e2e2e',color:'#e9e9e7',fontFamily:'monospace'}}>{b.text}</pre>
-                  if (b.type==='child_page'||b.type==='child_database') return (
-                    <button key={i} onClick={()=>b.id&&openNotionPage({id:b.id,title:b.text,url:b.url||''})}
-                      className="w-full flex items-center gap-2 py-2 rounded-lg active:bg-white/5 text-left">
-                      <span>📄</span><p className="text-[14px]" style={{color:'#2383e2'}}>{b.text}</p>
-                    </button>
-                  )
-                  // paragraph
-                  return <p key={i} className="text-[14px] py-0.5 leading-relaxed" style={{color:'#9b9a97'}}>{b.text}</p>
-                })}
-                </div>
+                {!notionLoading && (
+                  <div className="px-5 pb-6 space-y-0.5">
+                    {(()=>{ const nc={n:0}; return notionBlocks.map((b,i)=>renderBlock(b,i,nc)) })()}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -2107,7 +2889,7 @@ export default function Home() {
             <div className="px-4 py-3 shrink-0" style={{borderTop:'1px solid #2e2e2e',background:'#191919',paddingBottom:'calc(0.75rem + env(safe-area-inset-bottom,0px))'}}>
               <div className="flex gap-2 items-center">
                 <input value={notionAppend} onChange={e=>setNotionAppend(e.target.value)}
-                  placeholder="Yozing..." onKeyDown={e=>e.key==='Enter'&&appendToNotionPage()}
+                  placeholder="Sahifaga yozing..." onKeyDown={e=>e.key==='Enter'&&appendToNotionPage()}
                   className="flex-1 px-3 py-2 rounded-lg text-sm outline-none" style={{background:'#2e2e2e',color:'#e9e9e7',fontSize:'14px'}}/>
                 <button onClick={appendToNotionPage} disabled={!notionAppend.trim()}
                   className="w-9 h-9 rounded-lg flex items-center justify-center disabled:opacity-40 shrink-0" style={{background:'#2383e2'}}>
@@ -2117,7 +2899,8 @@ export default function Home() {
             </div>
           )}
         </div>
-      )}
+        )
+      })()}
 
       {/* ══ APPS SHEET ══ */}
       {appsOpen && (

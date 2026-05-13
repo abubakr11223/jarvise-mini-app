@@ -7,6 +7,10 @@
     {
       "path": "/api/cron/briefing?type=evening",
       "schedule": "0 14 * * *"
+    },
+    {
+      "path": "/api/cron/notion-watch",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

@@ -64,10 +64,16 @@ function extractTitle(item: Record<string, unknown>): string {
 async function notionGetTasks(): Promise<{title:string; status:string; db:string}[]> {
   if (!NOTION_TOKEN) return []
   try {
-    // 1. Barcha itemlarni izla
+    // 1. Barcha database larni izla — cache: 'no-store' muhim!
     const search = await fetch('https://api.notion.com/v1/search', {
-      method: 'POST', headers: NH(),
-      body: JSON.stringify({ page_size: 20 }),
+      method: 'POST',
+      headers: NH(),
+      cache: 'no-store',
+      body: JSON.stringify({
+        filter: { property: 'object', value: 'database' },
+        page_size: 30,
+        sort: { direction: 'descending', timestamp: 'last_edited_time' },
+      }),
     }).then(r => r.json())
 
     const tasks: {title:string; status:string; db:string}[] = []
@@ -76,28 +82,64 @@ async function notionGetTasks(): Promise<{title:string; status:string; db:string
       if (item.object !== 'database') continue
       const dbTitle = extractTitle(item)
 
-      // Har bir database'ni so'ra
+      // Har bir database'ni so'ra — cache: 'no-store'!
       const qr = await fetch(`https://api.notion.com/v1/databases/${item.id}/query`, {
-        method: 'POST', headers: NH(),
+        method: 'POST',
+        headers: NH(),
+        cache: 'no-store',
         body: JSON.stringify({
-          page_size: 30,
+          page_size: 50,
+          sorts: [{ timestamp: 'last_edited_time', direction: 'descending' }],
+          filter: {
+            property: 'Status',
+            status: { does_not_equal: '' },
+          },
+        }),
+      }).then(r => r.json()).catch(() => null)
+
+      // Status filtri ishlamasa, filtrsiz so'ra
+      const results = qr?.results || []
+      const qr2 = results.length === 0 ? await fetch(`https://api.notion.com/v1/databases/${item.id}/query`, {
+        method: 'POST',
+        headers: NH(),
+        cache: 'no-store',
+        body: JSON.stringify({
+          page_size: 50,
           sorts: [{ timestamp: 'last_edited_time', direction: 'descending' }],
         }),
-      }).then(r => r.json()).catch(() => ({ results: [] }))
+      }).then(r => r.json()).catch(() => ({ results: [] })) : null
 
-      for (const page of (qr.results || []) as Array<Record<string, unknown>>) {
+      const pages = (qr2?.results || results) as Array<Record<string, unknown>>
+
+      for (const page of pages) {
         const props = (page.properties || {}) as Record<string, Record<string, unknown>>
         const title = extractTitle(page)
-        if (!title) continue
+        if (!title || title === 'Untitled') continue
 
-        const statusProp = Object.values(props).find(p => p?.type === 'status' || p?.type === 'select')
-        const status = (statusProp?.status as {name:string})?.name
-          || (statusProp?.select as {name:string})?.name || ''
+        // Barcha status/select proplarini tekshir
+        let status = ''
+        for (const prop of Object.values(props)) {
+          if (prop?.type === 'status') {
+            status = (prop.status as {name:string})?.name || ''
+            if (status) break
+          }
+          if (prop?.type === 'select') {
+            const s = (prop.select as {name:string})?.name || ''
+            if (s) { status = s; break }
+          }
+          if (prop?.type === 'checkbox') {
+            const checked = prop.checkbox as boolean
+            if (checked !== undefined) {
+              status = checked ? 'Done' : 'Not started'
+              break
+            }
+          }
+        }
 
         tasks.push({ title, status, db: dbTitle })
       }
     }
-    return tasks.slice(0, 30)
+    return tasks.slice(0, 50)
   } catch { return [] }
 }
 
@@ -145,14 +187,22 @@ export async function buildBriefing(type: 'morning' | 'evening'): Promise<string
     getUnpaidDebts(),
   ])
 
+  // Status guruhlash yordamchisi
+  const isInProgress = (s: string) =>
+    /в\s*процессе|in[\s_]?progress|doing|active|работа|jarayonda|bajarilmoqda|davom/i.test(s)
+  const isNotStarted = (s: string) =>
+    /не\s*начато|not[\s_]?start|todo|backlog|планир|boshlanmagan|bajarilmagan|yangi|new/i.test(s)
+  const isDone = (s: string) =>
+    /выполнено|done|complet|завершен|finish|bajarildi|tugallandi|closed/i.test(s)
+
   if (type === 'morning') {
     // ── Ertalabki briefing ─────────────────────────────────────────
-    const inProgress = tasks.filter(t =>
-      /в процессе|in progress|doing|active|работа/i.test(t.status))
-    const notStarted = tasks.filter(t =>
-      /не начато|not started|todo|backlog|планир/i.test(t.status))
-    const done = tasks.filter(t =>
-      /выполнено|done|complete|завершен/i.test(t.status))
+    const inProgress = tasks.filter(t => isInProgress(t.status))
+    const notStarted = tasks.filter(t => isNotStarted(t.status))
+    const done       = tasks.filter(t => isDone(t.status))
+    // Status yo'q yoki noma'lum — not started deb hisobla
+    const unknown    = tasks.filter(t =>
+      !isInProgress(t.status) && !isNotStarted(t.status) && !isDone(t.status) && t.status)
 
     let msg = `🌅 *Ertalabki briefing — ${dateStr}*\n`
     msg += `_${dayName.charAt(0).toUpperCase() + dayName.slice(1)}_\n\n`
@@ -165,9 +215,10 @@ export async function buildBriefing(type: 'morning' | 'evening'): Promise<string
       msg += '\n'
     }
 
-    if (notStarted.length > 0) {
-      msg += `📋 *Boshlanmagan (${notStarted.length}):*\n`
-      notStarted.slice(0, 5).forEach(t => {
+    const allNotStarted = [...notStarted, ...unknown]
+    if (allNotStarted.length > 0) {
+      msg += `📋 *Boshlanmagan (${allNotStarted.length}):*\n`
+      allNotStarted.slice(0, 7).forEach(t => {
         msg += `• ${t.title}${t.db !== t.title ? ` _(${t.db})_` : ''}\n`
       })
       msg += '\n'
@@ -197,10 +248,8 @@ export async function buildBriefing(type: 'morning' | 'evening'): Promise<string
 
   } else {
     // ── Kechki hisobot ─────────────────────────────────────────────
-    const done = tasks.filter(t =>
-      /выполнено|done|complete|завершен/i.test(t.status))
-    const inProgress = tasks.filter(t =>
-      /в процессе|in progress|doing|active/i.test(t.status))
+    const done       = tasks.filter(t => isDone(t.status))
+    const inProgress = tasks.filter(t => isInProgress(t.status))
 
     let msg = `🌙 *Kechki hisobot — ${dateStr}*\n\n`
 
