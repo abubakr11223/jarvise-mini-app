@@ -411,6 +411,19 @@ export async function GET(request: NextRequest) {
             hasColumnHeader:!!(c as {has_column_header?:boolean}).has_column_header }
         }
 
+        if (t === 'embed' || t === 'bookmark' || t === 'link_preview') {
+          const url = (c.url as string) || ''
+          const cap = ((c.caption||[]) as unknown[]).map((r:unknown)=>(r as {plain_text:string}).plain_text||'').join('')
+          return { type:'embed', text: cap || url, segments:[], id, url }
+        }
+
+        if (t === 'video') {
+          const v = c as {type?:string; external?:{url:string}; file?:{url:string}; caption?:unknown[]}
+          const url = v.type==='external' ? (v.external?.url||'') : (v.file?.url||'')
+          const cap = ((v.caption||[]) as unknown[]).map((r:unknown)=>(r as {plain_text:string}).plain_text||'').join('')
+          return { type:'video', text: cap || url, segments:[], id, url }
+        }
+
         return { type:t, text, segments, id, has_children }
       }
 
@@ -573,7 +586,7 @@ export async function GET(request: NextRequest) {
             } catch {}
           }
 
-          if (parsed.text || ['divider','image','table'].includes(t)) result.push(parsed)
+          if (parsed.text || ['divider','image','table','embed','video'].includes(t)) result.push(parsed)
         }
         return result
       }
