@@ -2598,12 +2598,14 @@ export default function Home() {
 
           if (b.type==='child_page'||b.type==='child_database') {
             nc.n = 0
+            const cpIcon = b.icon || (b.type==='child_database' ? '🗃' : '📄')
             return (
-              <button key={b.id||idx} onClick={()=>b.id&&openNotionPage({id:b.id,title:txt,url:b.url||''})}
-                className="w-full flex items-center gap-2 py-1.5 rounded-lg active:bg-white/5 text-left">
-                <span className="text-[15px]">{b.type==='child_database'?'🗃':'📄'}</span>
-                <p className="text-[14px] flex-1" style={{color:'#2383e2'}}>{txt}</p>
-                <ChevronRight size={12} style={{color:'#2383e2',opacity:0.5}}/>
+              <button key={b.id||idx} onClick={()=>b.id&&openNotionPage({id:b.id,title:txt,url:b.url||'',emoji:b.icon||null})}
+                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left my-0.5 active:scale-[0.99] transition-transform"
+                style={{background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.08)'}}>
+                <span style={{fontSize:'18px',minWidth:'24px',textAlign:'center'}}>{cpIcon}</span>
+                <p className="text-[14px] font-medium flex-1 truncate" style={{color:'#e9e9e7'}}>{txt}</p>
+                <ChevronRight size={14} style={{color:'#787774',flexShrink:0}}/>
               </button>
             )
           }
@@ -2679,7 +2681,6 @@ export default function Home() {
             const embedUrl = b.url || b.text || ''
             const isYoutube = embedUrl.includes('youtube.com') || embedUrl.includes('youtu.be')
             const label = b.text && b.text !== embedUrl ? b.text : ''
-            // Try to get domain for display
             let domain = ''
             try { domain = new URL(embedUrl).hostname.replace('www.','') } catch {}
             return (
@@ -2687,16 +2688,16 @@ export default function Home() {
                 {isYoutube ? (
                   <iframe src={embedUrl.replace('watch?v=','embed/')} className="w-full rounded-lg" style={{height:'200px',border:'none'}} allowFullScreen/>
                 ) : (
-                  <a href={embedUrl} target="_blank" rel="noreferrer"
-                    className="flex items-center gap-3 rounded-lg px-3 py-2.5 no-underline"
+                  <button onClick={() => setInBrowserUrl(embedUrl)}
+                    className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left"
                     style={{background:'rgba(255,255,255,0.05)',border:'1px solid rgba(255,255,255,0.1)'}}>
                     <span style={{fontSize:'20px'}}>🔗</span>
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <div className="text-[13px] font-medium truncate" style={{color:'#e9e9e7'}}>{label || domain || embedUrl}</div>
                       {domain && label && <div className="text-[11px] truncate" style={{color:'#787774'}}>{domain}</div>}
                     </div>
-                    <span className="ml-auto text-[11px] shrink-0" style={{color:'#787774'}}>↗</span>
-                  </a>
+                    <span className="text-[11px] shrink-0" style={{color:'#787774'}}>↗</span>
+                  </button>
                 )}
               </div>
             )
