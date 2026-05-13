@@ -55,7 +55,7 @@ export async function GET(req: Request) {
     if (cached) {
       try {
         const list = JSON.parse(cached)
-        if (list.length > 4) // eski 4 ta cache bo'lsa qayta yuklaymiz
+        if (Array.isArray(list) && list.length > 0)
           return NextResponse.json({ ok: true, chats: list, total: list.length, cached: true })
       } catch {}
     }
@@ -73,66 +73,116 @@ export async function GET(req: Request) {
     await client.connect()
 
     const allChats: TgChat[] = []
-    const deadline = Date.now() + 48_000  // 48 soniya
-    const seen     = new Set<string>()
+    const seen = new Set<string>()
 
-    // iterDialogs — pagination ni o'zi boshqaradi, barcha chat turlarini qaytaradi
+    // ── Batch 1: GetDialogs to'g'ridan-to'g'ri API chaqiruvi (tez, ishonchli)
+    const { Api } = await import('telegram/tl')
+    let offsetDate = 0
+    let offsetId   = 0
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    for await (const dialog of (client as any).iterDialogs({ limit: 500 })) {
-      if (Date.now() > deadline) break
+    let offsetPeer: any = new Api.InputPeerEmpty()
+    const BATCH = 100
 
-      try {
+    for (let page = 0; page < 5; page++) {   // max 500 dialog (5 × 100)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await (client as any).invoke(new Api.messages.GetDialogs({
+        offsetDate,
+        offsetId,
+        offsetPeer,
+        limit:       BATCH,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const e = dialog.entity as any
-        if (!e) continue
+        hash:        0 as any,
+        excludePinned: false,
+        folderId:    undefined,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      })) as any
 
-        // ID
-        const id = String(e.id || dialog.id || '')
-        if (!id || seen.has(id)) continue
-        seen.add(id)
+      const dialogs  = result.dialogs  || []
+      const messages = result.messages || []
+      const users    = result.users    || []
+      const chats    = result.chats    || []
 
-        // Tur
-        const cls = e.className || ''
-        let type: TgChat['type'] = 'private'
-        if      (cls === 'Channel' && e.megagroup)  type = 'supergroup'
-        else if (cls === 'Channel')                 type = 'channel'
-        else if (cls === 'Chat')                    type = 'group'
-        else if (cls === 'User' && e.bot)           type = 'bot'
+      // Messages map
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const msgMap = new Map<string, any>()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for (const m of messages) msgMap.set(`${m.peerId?.userId||m.peerId?.chatId||m.peerId?.channelId}_${m.id}`, m)
 
-        // Nom
-        const title = dialog.title
-          || [e.firstName, e.lastName].filter(Boolean).join(' ').trim()
-          || e.username || ''
-        if (!title) continue
+      // Entity maps
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const userMap = new Map<string, any>()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const chatMap = new Map<string, any>()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for (const u of users) userMap.set(String(u.id), u)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for (const c of chats) chatMap.set(String(c.id), c)
 
-        // Oxirgi xabar
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const lm   = dialog.message as any
-        const lastMsg  = (lm?.message || '').slice(0, 80)
-        const lastDate = lm?.date
-          ? new Date(lm.date * 1000).toLocaleString('ru-RU', {
-              day: '2-digit', month: '2-digit',
-              hour: '2-digit', minute: '2-digit',
-            })
-          : ''
+      for (const dialog of dialogs) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const peer = dialog.peer as any
+          const userId    = peer?.userId    ? String(peer.userId)    : null
+          const chatId    = peer?.chatId    ? String(peer.chatId)    : null
+          const channelId = peer?.channelId ? String(peer.channelId) : null
+          const id = userId || chatId || channelId || ''
+          if (!id || seen.has(id)) continue
+          seen.add(id)
 
-        allChats.push({
-          id,
-          title,
-          type,
-          username:     e.username || '',
-          unread:       dialog.unreadCount || 0,
-          lastMsg,
-          lastDate,
-          pinned:       !!dialog.pinned,
-          membersCount: e.participantsCount || undefined,
-        })
-      } catch { continue }
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          let e: any = null
+          if (userId)    e = userMap.get(userId)
+          if (chatId)    e = chatMap.get(chatId)
+          if (channelId) e = chatMap.get(channelId)
+          if (!e) continue
+
+          const cls = e.className || ''
+          let type: TgChat['type'] = 'private'
+          if      (cls === 'Channel' && e.megagroup)  type = 'supergroup'
+          else if (cls === 'Channel')                 type = 'channel'
+          else if (cls === 'Chat')                    type = 'group'
+          else if (cls === 'User' && e.bot)           type = 'bot'
+
+          const title = e.title
+            || [e.firstName, e.lastName].filter(Boolean).join(' ').trim()
+            || e.username || ''
+          if (!title) continue
+
+          // Oxirgi xabar
+          const topMsg  = messages.find((m: { id: number }) => m.id === dialog.topMessage)
+          const lastMsg  = (topMsg?.message || '').slice(0, 80)
+          const lastDate = topMsg?.date
+            ? new Date(topMsg.date * 1000).toLocaleString('ru-RU', {
+                day: '2-digit', month: '2-digit',
+                hour: '2-digit', minute: '2-digit',
+              })
+            : ''
+
+          allChats.push({
+            id,
+            title,
+            type,
+            username:     e.username || '',
+            unread:       dialog.unreadCount || 0,
+            lastMsg,
+            lastDate,
+            pinned:       !!dialog.pinned,
+            membersCount: e.participantsCount || undefined,
+          })
+        } catch { continue }
+      }
+
+      // Keyingi sahifa uchun offset
+      if (dialogs.length < BATCH) break  // oxirgi batch
+      const last = dialogs[dialogs.length - 1]
+      offsetDate = messages.find((m: { id: number }) => m.id === last?.topMessage)?.date || offsetDate
+      offsetId   = last?.topMessage || offsetId
+      offsetPeer = last?.peer || offsetPeer
     }
 
     await client.disconnect()
 
-    // Saralash: pinned → unread → yangi xabar
+    // Saralash: pinned → unread → lastDate (descending)
     allChats.sort((a, b) => {
       if (a.pinned && !b.pinned) return -1
       if (!a.pinned && b.pinned) return 1
