@@ -827,10 +827,12 @@ export default function Home() {
     abortRef.current = new AbortController()
     const timer = setTimeout(()=>abortRef.current?.abort(),20000)
     try {
+      const isVoiceMsg = isVoiceOriginRef.current
+      isVoiceOriginRef.current = false
       const res = await fetch(N8N_WEBHOOK_URL,{
         method:'POST', signal:abortRef.current.signal,
         headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({message:text, user_id:userData?.id||0, username:userData?.username||userData?.first_name||'User'}),
+        body:JSON.stringify({message:text, user_id:userData?.id||0, username:userData?.username||userData?.first_name||'User', isVoice: isVoiceMsg}),
       })
       clearTimeout(timer)
       if (!res.ok) throw new Error(`Xato: ${res.status}`)
@@ -873,9 +875,11 @@ export default function Home() {
 
   // ─── Voice ────────────────────────────────────────────────────────────────
   const cancelVoiceSend = () => { if(voiceTimerRef.current) clearInterval(voiceTimerRef.current); voiceTimerRef.current=null; setVoiceCountdown(null); pendingVoiceRef.current='' }
+  const isVoiceOriginRef = useRef(false)
   const finishVoice = (text: string) => {
     setIsRecording(false); setInterimText('')
     if (!text.trim()) return
+    isVoiceOriginRef.current = true
     setInputText(text.trim()); pendingVoiceRef.current=text.trim()
     let count=2; setVoiceCountdown(count)
     voiceTimerRef.current=setInterval(()=>{ count--; if(count<=0){ clearInterval(voiceTimerRef.current!); voiceTimerRef.current=null; setVoiceCountdown(null); const p=pendingVoiceRef.current; if(p){pendingVoiceRef.current='';setInputText('');sendToAI(p)} } else setVoiceCountdown(count) },1000)

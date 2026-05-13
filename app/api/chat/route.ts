@@ -7,6 +7,12 @@ const NOTION_PARENT = process.env.NOTION_PARENT_PAGE_ID
 const N8N_URL       = process.env.N8N_WEBHOOK_URL ||
   'https://abusaidbakrdov.app.n8n.cloud/webhook/8bafdcfb-2d60-4698-ad3e-920c16074495'
 
+const REDIS_URL   = process.env.KV_REST_API_URL   || process.env.UPSTASH_REDIS_REST_URL
+const REDIS_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN
+
+const TG_API_ID   = parseInt(process.env.TELEGRAM_API_ID   || '0')
+const TG_API_HASH = process.env.TELEGRAM_API_HASH || ''
+
 const NOTION_API = 'https://api.notion.com/v1'
 const NH = () => ({
   'Authorization': `Bearer ${NOTION_TOKEN}`,
@@ -51,6 +57,20 @@ function isQuestion(text: string): boolean {
                'расскажи','объясни','what is','how','who is','where','when','why',
                'курс','dollar','valyuta','ob-havo','pogoda','погода','narx','цена','price']
   return qw.some(w => text.toLowerCase().includes(w))
+}
+
+// ════════════════════════════════════════════════════════
+//  KV (Redis) helpers
+// ════════════════════════════════════════════════════════
+async function kvGet(key: string): Promise<string | null> {
+  if (!REDIS_URL || !REDIS_TOKEN) return null
+  try {
+    const r = await fetch(`${REDIS_URL}/get/${key}`, {
+      headers: { Authorization: `Bearer ${REDIS_TOKEN}` }, cache: 'no-store',
+    })
+    const { result } = await r.json()
+    return result ? String(result).replace(/^"|"$/g, '') : null
+  } catch { return null }
 }
 
 // ════════════════════════════════════════════════════════
@@ -342,6 +362,171 @@ async function executeNotionCommand(
 }
 
 // ════════════════════════════════════════════════════════
+//  TELEGRAM AI — kontaktni topib xabar yuborish
+// ════════════════════════════════════════════════════════
+
+// Buyruq kalit so'zlari
+const TG_KW = [
+  'ga ayt','ga yoz','ga xabar ber','ga yetkazib quy','ga yetkazib ber',
+  'ga yubor','uchun yoz','ga telegramdan yoz','ga tg yoz',
+  'скажи','напиши','отправь','передай','сообщи','напомни',
+  'tell ','send to ','message to ',
+]
+
+function detectTelegramSend(text: string): boolean {
+  const l = text.toLowerCase()
+  return TG_KW.some(w => l.includes(w))
+}
+
+// Groq orqali kim + nima deyish kerakligini tahlil qilish
+async function parseTgSendCommand(userMsg: string): Promise<{
+  recipient: string; content: string
+}> {
+  const raw = await callGroq([
+    {
+      role: 'system',
+      content: `Foydalanuvchi Telegram xabar yuborish buyrug'ini JSON ga aylantir.
+Format: {"recipient":"shaxs ismi","content":"yuborish kerak bo'lgan xabar (faqat mazmun, assistant framing yo'q)"}
+Misol1: "Abubakrga ayt bugun kech kelaman" → {"recipient":"Abubakr","content":"bugun kech kelaman"}
+Misol2: "Saraga yoz ertaga uchrashuv 3da" → {"recipient":"Sara","content":"ertaga uchrashuv soat 3da"}
+Misol3: "Скажи Даше что опоздаю" → {"recipient":"Даша","content":"опоздаю"}
+FAQAT JSON qaytar.`,
+    },
+    { role: 'user', content: userMsg }
+  ], { maxTokens: 150, temperature: 0.1, json: true })
+
+  try { return JSON.parse(raw) as { recipient: string; content: string } }
+  catch { return { recipient: '', content: '' } }
+}
+
+// Contacts yoki chats Redis cache dan recipient qidirish
+async function findTgRecipient(name: string): Promise<{
+  id: string; title: string; username: string; type: string
+} | null> {
+  const nl = name.toLowerCase().trim()
+  if (!nl) return null
+
+  // 1. Contacts cache
+  const cJson = await kvGet('tg_userbot_contacts_cache')
+  if (cJson) {
+    try {
+      const contacts = JSON.parse(cJson) as Array<{
+        id: string; name: string; firstName: string; lastName: string; username: string
+      }>
+      const m = contacts.find(c =>
+        c.name.toLowerCase().includes(nl) ||
+        c.firstName.toLowerCase().includes(nl) ||
+        (c.lastName && c.lastName.toLowerCase().includes(nl)) ||
+        (c.username && c.username.toLowerCase().includes(nl))
+      )
+      if (m) return { id: m.id, title: m.name, username: m.username, type: 'private' }
+    } catch {}
+  }
+
+  // 2. Chats cache
+  const chJson = await kvGet('tg_userbot_chats_v3')
+  if (chJson) {
+    try {
+      const chats = JSON.parse(chJson) as Array<{
+        id: string; title: string; username: string; type: string
+      }>
+      const m = chats.find(c =>
+        c.title.toLowerCase().includes(nl) ||
+        (c.username && c.username.toLowerCase().includes(nl))
+      )
+      if (m) return { id: m.id, title: m.title, username: m.username, type: m.type }
+    } catch {}
+  }
+
+  return null
+}
+
+// GramJS orqali xabar yuborish
+async function sendTgMessage(
+  recipientId: string, recipientUsername: string, text: string
+): Promise<boolean> {
+  if (!TG_API_ID || !TG_API_HASH) return false
+  const session = await kvGet('tg_userbot_session')
+  if (!session) return false
+
+  try {
+    const { TelegramClient } = await import('telegram')
+    const { StringSession }  = await import('telegram/sessions')
+    const client = new TelegramClient(
+      new StringSession(session), TG_API_ID, TG_API_HASH,
+      { connectionRetries: 2, timeout: 20 }
+    )
+    await client.connect()
+    const entity = recipientUsername ? `@${recipientUsername.replace('@', '')}` : recipientId
+    await client.sendMessage(entity, { message: text })
+    await client.disconnect()
+    return true
+  } catch { return false }
+}
+
+// AI yordamida "assistant" xabarini compose qilish
+async function composeTgMessage(
+  recipientName: string, content: string, lang: string, ownerName = 'Suhrob'
+): Promise<string> {
+  const prompt = lang === 'ru'
+    ? `Ты — умный ассистент ${ownerName}. Напиши короткое вежливое сообщение для "${recipientName}".
+Суть: "${content}"
+Представься как ассистент ${ownerName}. Пиши естественно, без лишних слов. Только сообщение.`
+    : `Sen ${ownerName}ning aqlli yordamchisisan. "${recipientName}" uchun qisqa, muloyim xabar yoz.
+Mazmun: "${content}"
+${ownerName}ning yordamchisi sifatida tanish. Tabiiy yoz, keraksiz so'zsiz. Faqat xabar.`
+
+  const msg = await callGroq([
+    { role: 'system', content: prompt },
+    { role: 'user',   content: content }
+  ], { maxTokens: 200, temperature: 0.5 })
+
+  return msg || content
+}
+
+// Telegram buyrug'ini to'liq bajarish
+async function executeTgSend(userMsg: string, lang: string, isVoice = false): Promise<string> {
+  const t = (uz: string, ru: string) => lang === 'ru' ? ru : uz
+
+  // 1. Parse
+  const cmd = await parseTgSendCommand(userMsg)
+  if (!cmd.recipient || !cmd.content) {
+    return t(
+      '❓ Kimga va nima deyishni aniqroq ayting. Masalan: _"Abubakrga ayt bugun kech kelaman"_',
+      '❓ Уточните кому и что сказать. Например: _"Скажи Даше что опоздаю"_'
+    )
+  }
+
+  // 2. Recipient qidirish
+  const recipient = await findTgRecipient(cmd.recipient)
+  if (!recipient) {
+    return t(
+      `❌ **"${cmd.recipient}"** kontaktlar orasida topilmadi.\n💡 Avval Telegram panelidagi kontaktlarni yangilang.`,
+      `❌ **"${cmd.recipient}"** не найден среди контактов.\n💡 Обновите контакты в панели Telegram.`
+    )
+  }
+
+  // 3. Xabarni compose qilish
+  const composed = await composeTgMessage(recipient.title, cmd.content, lang)
+
+  // 4. Yuborish
+  const sent = await sendTgMessage(recipient.id, recipient.username, composed)
+
+  if (!sent) {
+    return t(
+      `❌ Xabar yuborilmadi. Telegram ulangan emasmi?\n_Yubormoqchi bo'lgan xabar:_\n"${composed}"`,
+      `❌ Сообщение не отправлено. Telegram подключён?\n_Текст сообщения:_\n"${composed}"`
+    )
+  }
+
+  const modeIcon = isVoice ? '🎤' : '💬'
+  return t(
+    `${modeIcon} **${recipient.title}** ga xabar yuborildi!\n\n_"${composed}"_`,
+    `${modeIcon} Сообщение отправлено **${recipient.title}**!\n\n_"${composed}"_`
+  )
+}
+
+// ════════════════════════════════════════════════════════
 //  ASOSIY SYSTEM PROMPT
 // ════════════════════════════════════════════════════════
 const SYSTEM = `Sen JONKA — aqlli shaxsiy moliya, hayot va Notion assistentisan.
@@ -362,7 +547,14 @@ export async function POST(request: NextRequest) {
     const cyrCount = (userMsg.match(/[а-яёА-ЯЁ]/g)||[]).length
     const lang     = cyrCount > userMsg.length * 0.1 ? 'ru' : 'uz'
 
-    // ── 1. Notion buyrug'ini tekshiramiz ──────────────────────────────────
+    // ── 1. Telegram xabar yuborish buyrug'i ──────────────────────────────
+    const isVoice = !!(body.isVoice)
+    if (detectTelegramSend(userMsg)) {
+      const result = await executeTgSend(userMsg, lang, isVoice)
+      return NextResponse.json({ reply: result })
+    }
+
+    // ── 2. Notion buyrug'ini tekshiramiz ──────────────────────────────────
     const notionAction = detectNotionAction(userMsg)
     if (notionAction) {
       const cmd = await parseNotionCommand(userMsg)
